@@ -14,14 +14,15 @@
 | Props | 10 | ColumnBroken×3, StoneDebris×3, OrnamentBroken×2, GlowMotes×2(WPO 부유 입자, 비Nanite) | `gen_props.py` |
 
 정점 색: R = 조각 난수, G = 성장축 0→1, B = 결정면 단위 난수(셰이더 변화용).
+수정 메시는 Blender Bevel 모디파이어(인접 모서리 길이의 7%, 2분할, 28° 이상 모서리, Harden Normals)로 모서리를 깎아 하이라이트가 맺힙니다 (메시당 350–35,500 삼각형).
 충돌: 건축은 FBX `UCX_` 볼록 헐(닫힌 건물 = 박스 1개, 회랑·다리·계단·광장 = 세부 헐), 동굴·암석·바닥 수정은 Complex-as-Simple, 천장 수정은 충돌 없음.
 
 ## 머티리얼 (Content/CrystalKingdom/Materials)
 | 마스터 | 내용 |
 |---|---|
-| M_Crystal_Master | 불투명 수정. 박막 간섭색(프레넬·면·내포물), BumpOffset 시차 내부 균열, 끝으로 갈수록 강해지는 내부 발광, 림 발광, 면별 거칠기 |
+| M_Crystal_Master | 불투명 수정, Clear Coat(우윳빛 바탕 + 유리 코팅). 오팔 팔레트 간섭색(패치 필드·결정면·조각·시야각), 크랙클 금갈색 균열, BumpOffset 시차 2층(내부 균열·내부 오팔), 거리 페이드(원경 타일 반짝임 제거), 림·내부 발광 |
 | M_Crystal_Glass | 반투명 굴절(IOR 1.45) 히어로 수정. Surface 반투명 조명 |
-| M_Rock_Master | 양면. 매크로 변화(월드 좌표), 물가 젖음(수위 기준 어둡게·매끄럽게) |
+| M_Rock_Master | 양면. 매크로 변화(월드 좌표), 균열 어둡게, 물가 젖음 띠, 수면 아래는 밝은 퇴적층 색(맑은 물로 바닥이 비침) |
 | M_Stone_Master | 석조 블록 색 변화, 줄눈, 오염, 물가 청록 착색 |
 | M_Water | Single Layer Water, 2층 흐르는 잔물결 노멀, 산란·흡수 계수 |
 | M_WindowGlow / M_Door / M_GlowMote | 창문 발광, 닫힌 문, 가산 부유 입자 |
@@ -29,7 +30,7 @@
 인스턴스 13개: MI_Crystal_Teal / White / Violet / Glow / Opal / Glass / Block / BlockViolet, MI_CaveRock, MI_Rock, MI_Stone, MI_StoneTrim, MI_Roof
 
 ## 텍스처 (Content/CrystalKingdom/Textures, 원본 SourceArt/Textures)
-T_Rock_N/M, T_Crystal_N/M(균열·구름·결 줄무늬), T_Water_N, T_Stone_N/M(2 m 석조 블록 타일). 모두 numpy로 생성했고 이음매 없이 반복됩니다.
+T_Rock_N/M(능선·워프 층리·드문 균열), T_Crystal_M(R 크랙클 균열망, G 우윳빛 구름, B 오팔 패치 필드), T_Crystal_N(패각상 물결·성장 줄무늬·균열 홈), T_Water_N, T_Stone_N/M(2 m 석조 블록 타일). 모두 numpy로 생성했고 이음매 없이 반복됩니다.
 
 ## 레벨 · 블루프린트
 - `Maps/CK_Main` — 액터 약 1,030개: 동굴 44, 단구 9, 건물 23, 수정 랜드마크 18, 천장 수정 106, 벽 수정 170, 바닥 수정·암석 420, 전경 33, 천장 암석 40, 해안 암석 90, 수중 암석 21, 조명 47, 카메라 6 + PlayerStart
@@ -50,3 +51,4 @@ T_Rock_N/M, T_Crystal_N/M(균열·구름·결 줄무늬), T_Water_N, T_Stone_N/M
 | Scripts/Unreal/ck_build_level.py, ck_level_common.py | 레벨 조립(`stage=world|crystals|lighting|cameras`) |
 | Scripts/Unreal/ck_validate_collision.py | 보행 표면 충돌 검증 |
 | Tools/perf.ps1, Tools/csvstats.py | 독립 실행 CSV 프로파일 측정·요약 |
+| Tools/compare_sheet.ps1 | 레퍼런스·이전·이후 비교 시트(전체 + 같은 영역 확대) |

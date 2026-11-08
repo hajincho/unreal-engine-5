@@ -28,6 +28,16 @@ def new_material(name):
     if EAL.does_asset_exist(path):
         m = unreal.load_asset(path)
         ML.delete_all_material_expressions(m)
+        # delete_all leaves some nodes behind (e.g. SingleLayerWaterMaterialOutput); a second SLW output
+        # node makes the water fail to compile, so remove whatever is left one by one.
+        for _ in range(5):
+            left = list(ML.get_material_expressions(m))
+            if not left:
+                break
+            for e in left:
+                ML.delete_material_expression(m, e)
+        if ML.get_num_material_expressions(m):
+            print("WARNING %s still has %d expressions after clearing" % (name, ML.get_num_material_expressions(m)))
         return m
     return AT.create_asset(name, MASTER, unreal.Material, unreal.MaterialFactoryNew())
 
@@ -118,27 +128,48 @@ def finish(m):
 
 
 # --------------------------------------------------------------------------- crystal
-CRYSTAL_COLOR = r"""
+# Inputs shared by the colour / emissive nodes:
+#   M  surface sample  (R fractures, G milky cloud, B opal field)
+#   P  opal patch sample (larger scale, offset per crystal piece by VC.r)
+#   D1 shallow parallax layer, D2 deep parallax layer (read "inside" the crystal)
+#   MP macro sample (very large scale; slow hue drift across a giant crystal)
+OPAL = r"""
 float t = saturate(VC.g);
-float3 body = lerp(Deep, Base, saturate(0.25 + 0.6*M.g + 0.35*t));
-body *= lerp(0.45, 1.35, VC.b);   // every facet catches light differently
-float h = IridScale*(F*1.35 + VC.b*0.75 + M.b*0.45 + VC.r*0.35) + IridShift;
-float3 irid = 0.5 + 0.5*cos(6.28318*(h + float3(0.0, 0.33, 0.67)));
-irid = lerp(irid, float3(0.62,0.38,0.95)*irid*1.6, 0.25);
-float im = saturate(IridStr * (pow(F, 0.7)*1.2 + VC.b*0.5 + M.g*0.35 - 0.1));
-float3 c = lerp(body, irid, im);
-c = lerp(c, float3(0.95,0.98,1.0), saturate(M.r*CrackStr));
-c = lerp(c, Gold, saturate((VC.b - 0.86)*5.0) * GoldAmt);
+// fade the 2 m tiling detail toward its mean with distance (giants 50-200 m away otherwise shimmer like sequins)
+float fd = saturate((Dpt - FadeNear) / FadeRange);
+M.rgb  = lerp(M.rgb,  float3(0.0, 0.5, 0.5), fd);
+D1.rgb = lerp(D1.rgb, float3(0.0, 0.5, 0.5), fd);
+D2.r   = lerp(D2.r, 0.0, fd);
+float Pf = P.b*0.6 + D2.b*0.4;
+// hue: facet (VC.b) and piece (VC.r) pick a base hue, view angle and the soft patch field shift it
+float h = IridScale*(Pf*1.1 + M.b*0.45 + F*0.9 + VC.b*0.55 + MP.b*0.8) + VC.r*0.7 + IridShift;   // M.b: play-of-colour inside a patch
+// opal palette (violet, blue, teal, pink, gold) instead of a full rainbow - no yellow-green
+float3 pal[5] = { float3(0.66,0.40,1.0), float3(0.30,0.62,1.0), float3(0.30,1.0,0.85), float3(1.0,0.50,0.88), float3(1.0,0.80,0.40) };
+float x = frac(h)*5.0;
+int i0 = (int)floor(x);
+int i1 = (i0 + 1) % 5;
+float3 irid = lerp(pal[i0], pal[i1], smoothstep(0.0, 1.0, frac(x)));
+float pm = smoothstep(0.30, 0.46, Pf*0.65 + D1.g*0.15 + VC.b*0.25);   // crisp flash boundaries
+float im = saturate(IridStr*(pm*0.9 + pow(F, 1.2)*0.7));
+float cloud = saturate(0.4 + (M.g - 0.5)*0.35 + (D1.g - 0.5)*0.45);   // soft milkiness, no camouflage blotches
+"""
+
+CRYSTAL_COLOR = OPAL + r"""
+float3 body = lerp(Deep, Base, saturate(0.3 + 0.55*cloud + 0.25*t));
+body = lerp(body, Milk, saturate(cloud*MilkAmt));
+body *= lerp(0.82, 1.12, VC.b);                 // facets differ a little
+float3 c = lerp(body, irid*lerp(0.6, 1.0, cloud), im);
+c = lerp(c, Gold*0.3, saturate(M.r*CrackStr));           // fine dark gold-brown surface cracks
+c = lerp(c, float3(0.92,0.96,1.0), saturate(D1.r*InnerCrack*0.5));  // white inner fractures
 return c;
 """
 
-CRYSTAL_EMIT = r"""
-float t = saturate(VC.g);
-float inner = (0.3 + 0.7*M.g) * (0.35 + 0.65*t);
-float3 e = GlowColor * Glow * inner * lerp(0.35, 1.4, VC.b);
-e += GlowColor * Glow * 1.2 * pow(F, 3.0);   // bright rim where facets turn away
-e += GlowColor * Glow * 0.9 * pow(M2.r, 2.0) * InnerCrack * (0.6 + 0.4*t);
-e += GlowColor * Glow * 0.8 * M.r * CrackStr * 0.5;
+CRYSTAL_EMIT = OPAL + r"""
+float3 e = GlowColor*Glow*(0.2 + 0.8*cloud)*(0.35 + 0.65*t)*lerp(0.6, 1.25, VC.b);
+e += irid*im*OpalGlow*(0.4 + 0.6*cloud);         // opal fire glows from inside
+e += GlowColor*Glow*0.9*pow(F, 3.0);             // rim
+e += GlowColor*Glow*1.2*pow(D2.r, 1.5)*InnerCrack*(0.5 + 0.5*t);
+e += Gold*Glow*0.6*M.r*CrackStr;
 return e;
 """
 
@@ -149,57 +180,89 @@ def build_crystal(name, translucent=False):
         m.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
         m.set_editor_property("translucency_lighting_mode", unreal.TranslucencyLightingMode.TLM_SURFACE)
         m.set_editor_property("two_sided", False)
+    else:
+        m.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_CLEAR_COAT)
     g = G(m)
     vc = g.node(unreal.MaterialExpressionVertexColor)
     uvs = g.scalar("UVScale", 2.0)
     tc = g.node(unreal.MaterialExpressionTextureCoordinate)
     uv = g.mul(tc, uvs)
+    F2 = unreal.CustomMaterialOutputType.CMOT_FLOAT2
     tm = g.tex("CrystalMask", TEX + "/T_Crystal_M", uv)
-    bo = g.node(unreal.MaterialExpressionBumpOffset, height_ratio=-0.18, reference_plane=0.0)
-    uv2 = g.mul(uv, g.const(0.73))
-    g.link(uv2, "", bo, "Coordinate")
-    g.link(g.scalar("InnerDepth", 1.0), "", bo, "Height")
-    tm2 = g.tex("CrystalMaskInner", TEX + "/T_Crystal_M", bo)
+    puv = g.custom("return UV*S + VC.r*float2(3.7, 7.1);", [("UV", uv), ("S", g.scalar("PatchScale", 0.14)), ("VC", vc)], out=F2, desc="PatchUV")
+    tp = g.tex("CrystalPatch", TEX + "/T_Crystal_M", puv)
+    muv = g.custom("return UV*S + VC.r*float2(0.31, 0.57);", [("UV", uv), ("S", g.scalar("MacroScale", 0.035)), ("VC", vc)], out=F2, desc="MacroUV")
+    tmac = g.tex("CrystalMacro", TEX + "/T_Crystal_M", muv)
+    depth = g.scalar("InnerDepth", 1.0)
+    bo1 = g.node(unreal.MaterialExpressionBumpOffset, height_ratio=-0.10, reference_plane=0.0)
+    g.link(g.mul(uv, g.const(0.73)), "", bo1, "Coordinate")
+    g.link(depth, "", bo1, "Height")
+    td1 = g.tex("CrystalInner1", TEX + "/T_Crystal_M", bo1)
+    bo2 = g.node(unreal.MaterialExpressionBumpOffset, height_ratio=-0.28, reference_plane=0.0)
+    g.link(puv, "", bo2, "Coordinate")
+    g.link(depth, "", bo2, "Height")
+    td2 = g.tex("CrystalInner2", TEX + "/T_Crystal_M", bo2)
     tn = g.tex("CrystalNormal", TEX + "/T_Crystal_N", uv, normal=True)
     fr = g.node(unreal.MaterialExpressionFresnel)
     g.link(g.scalar("FresnelExp", 2.2), "", fr, "ExponentIn")
     g.link(g.scalar("FresnelBase", 0.04), "", fr, "BaseReflectFractionIn")
-    base = g.vec("BaseTint", (0.26, 0.54, 0.60))
-    deep = g.vec("DeepTint", (0.02, 0.13, 0.20))
+    base = g.vec("BaseTint", (0.55, 0.74, 0.78))
+    deep = g.vec("DeepTint", (0.05, 0.20, 0.27))
+    milk = g.vec("MilkTint", (0.82, 0.88, 0.92))
     gold = g.vec("GoldTint", (1.0, 0.72, 0.30))
-    col = g.custom(CRYSTAL_COLOR, [("F", fr), ("VC", vc), ("M", tm), ("Base", base), ("Deep", deep),
-                                   ("IridStr", g.scalar("IridStrength", 0.65)), ("IridScale", g.scalar("IridScale", 1.0)),
-                                   ("IridShift", g.scalar("IridShift", 0.55)), ("CrackStr", g.scalar("CrackStrength", 0.08)),
-                                   ("Gold", gold), ("GoldAmt", g.scalar("GoldAmount", 0.6))], desc="CrystalColor")
-    emi = g.custom(CRYSTAL_EMIT, [("F", fr), ("VC", vc), ("M", tm), ("M2", tm2), ("GlowColor", g.vec("GlowColor", (0.30, 0.85, 1.0))),
-                                  ("Glow", g.scalar("GlowIntensity", 0.55)), ("InnerCrack", g.scalar("InnerCrack", 0.35)),
-                                  ("CrackStr", g.scalar("CrackStrength", 0.08))], desc="CrystalEmissive")
-    rough = g.custom("return lerp(RMin, RMax, saturate(VC.b*0.7 + M.g*0.3)) + M.r*0.15;",
-                     [("VC", vc), ("M", tm), ("RMin", g.scalar("RoughnessMin", 0.02)), ("RMax", g.scalar("RoughnessMax", 0.22))],
-                     out=unreal.CustomMaterialOutputType.CMOT_FLOAT1, desc="FacetRoughness")
-    nrm = g.flat_normal(tn, g.scalar("NormalStrength", 0.3))
-    g.out(col, MP.MP_BASE_COLOR)
-    g.out(emi, MP.MP_EMISSIVE_COLOR)
-    g.out(rough, MP.MP_ROUGHNESS)
-    g.out(nrm, MP.MP_NORMAL)
-    g.out(g.scalar("Specular", 0.75), MP.MP_SPECULAR)
+    glowc = g.vec("GlowColor", (0.30, 0.85, 1.0))
+    s = {k: g.scalar(k, v) for k, v in (("IridStrength", 0.95), ("IridScale", 1.0), ("IridShift", 0.55), ("CrackStrength", 0.55),
+                                         ("GlowIntensity", 0.45), ("InnerCrack", 0.5), ("OpalGlow", 0.28), ("MilkAmount", 0.7))}
+    dpt = g.node(unreal.MaterialExpressionPixelDepth)
+    common = [("F", fr), ("VC", vc), ("M", tm), ("P", tp), ("D1", td1), ("D2", td2), ("MP", tmac), ("Dpt", dpt),
+              ("FadeNear", g.scalar("DetailFadeNear", 2500.0)), ("FadeRange", g.scalar("DetailFadeRange", 9000.0)),
+              ("IridStr", s["IridStrength"]), ("IridScale", s["IridScale"]), ("IridShift", s["IridShift"])]
+    col = g.custom(CRYSTAL_COLOR, common + [("Base", base), ("Deep", deep), ("Milk", milk), ("MilkAmt", s["MilkAmount"]),
+                                             ("Gold", gold), ("CrackStr", s["CrackStrength"]), ("InnerCrack", s["InnerCrack"])], desc="CrystalColor")
+    emi = g.custom(CRYSTAL_EMIT, common + [("GlowColor", glowc), ("Glow", s["GlowIntensity"]), ("InnerCrack", s["InnerCrack"]),
+                                            ("OpalGlow", s["OpalGlow"]), ("Gold", gold), ("CrackStr", s["CrackStrength"])], desc="CrystalEmissive")
+    rough = g.custom("return lerp(RMin, RMax, saturate(M.g*0.6 + VC.b*0.4)) + M.r*0.2;",
+                     [("VC", vc), ("M", tm), ("RMin", g.scalar("RoughnessMin", 0.18)), ("RMax", g.scalar("RoughnessMax", 0.45))],
+                     out=unreal.CustomMaterialOutputType.CMOT_FLOAT1, desc="BodyRoughness")
+    nrm = g.flat_normal(tn, g.scalar("NormalStrength", 0.35))
+    spec = g.scalar("Specular", 0.5)
     if translucent:
+        g.out(col, MP.MP_BASE_COLOR)
+        g.out(emi, MP.MP_EMISSIVE_COLOR)
+        g.out(rough, MP.MP_ROUGHNESS)
+        g.out(nrm, MP.MP_NORMAL)
+        g.out(spec, MP.MP_SPECULAR)
         op = g.custom("return saturate(Op + F*0.55 + M.r*0.3);", [("Op", g.scalar("Opacity", 0.28)), ("F", fr), ("M", tm)],
                       out=unreal.CustomMaterialOutputType.CMOT_FLOAT1, desc="Opacity")
         g.out(op, MP.MP_OPACITY)
         g.out(g.scalar("IOR", 1.45), MP.MP_REFRACTION)
+    else:
+        # glossy coat over a milky body: sharp reflections of window light and shafts.
+        # ClearCoat pins are not exposed to Python as MaterialProperty -> go through MakeMaterialAttributes.
+        m.set_editor_property("use_material_attributes", True)
+        ma = g.node(unreal.MaterialExpressionMakeMaterialAttributes)
+        coat_r = g.custom("return lerp(C0, C1, VC.b) + M.r*0.15;", [("VC", vc), ("M", tm), ("C0", g.scalar("CoatRoughMin", 0.02)),
+                                                                     ("C1", g.scalar("CoatRoughMax", 0.09))],
+                          out=unreal.CustomMaterialOutputType.CMOT_FLOAT1, desc="CoatRough")
+        for src, pin in ((col, "BaseColor"), (emi, "EmissiveColor"), (rough, "Roughness"), (nrm, "Normal"), (spec, "Specular"),
+                         (g.scalar("ClearCoat", 1.0), "ClearCoat"), (coat_r, "ClearCoatRoughness")):
+            g.link(src, "", ma, pin)
+        g.out(ma, MP.MP_MATERIAL_ATTRIBUTES)
     finish(m)
     return m
 
 
 # --------------------------------------------------------------------------- rock
 ROCK_COLOR = r"""
-float macro = saturate(N1.g*0.7 + N2.g*0.3);
-float3 c = lerp(Dark, Light, saturate(M.r*0.55 + macro*0.45));
+float macro = saturate(N1.b*0.7 + N2.b*0.3);
+float3 c = lerp(Dark, Light, saturate(M.r*0.65 + macro*0.35));
 c = lerp(c, Tint, saturate(macro*1.4 - 0.6) * TintAmt);
-c *= lerp(0.8, 1.0, M.g);
-float wet = 1.0 - saturate((WP.z - WaterZ) / WetH);
-c *= lerp(1.0, 0.5, wet);
+c *= lerp(0.35, 1.0, M.g);                       // fractures read dark
+float dz = WP.z - WaterZ;
+float wet = 1.0 - saturate(dz / WetH);
+float under = saturate(-dz / 150.0);              // fully submerged 1.5 m below the surface
+c *= lerp(1.0, 0.55, wet*(1.0 - under));          // dark wet band at the shoreline
+c = lerp(c, Silt*lerp(0.75, 1.1, M.r), under*SiltAmt);   // pale lake bed seen through clear water
 return c;
 """
 
@@ -214,13 +277,14 @@ def build_rock():
     wp = g.node(unreal.MaterialExpressionWorldPosition)
     wpm = g.node(unreal.MaterialExpressionComponentMask, r=True, g=True, b=False, a=False)
     g.link(wp, "", wpm, "")
-    n1 = g.tex("MacroNoise", TEX + "/T_Crystal_M", g.mul(wpm, g.const(0.00011)))
+    n1 = g.tex("MacroNoise", TEX + "/T_Rock_M", g.mul(wpm, g.const(0.00011)))
     n2 = g.tex("MacroNoise2", TEX + "/T_Rock_M", g.mul(wpm, g.const(0.0006)))
-    col = g.custom(ROCK_COLOR, [("M", tm), ("N1", n1), ("N2", n2), ("Dark", g.vec("DarkColor", (0.035, 0.045, 0.055), "Rock")),
-                                ("Light", g.vec("LightColor", (0.17, 0.19, 0.21), "Rock")), ("Tint", g.vec("TintColor", (0.18, 0.40, 0.45), "Rock")),
-                                ("TintAmt", g.scalar("TintAmount", 0.4, "Rock")), ("WP", wp), ("WaterZ", g.scalar("WaterZ", 0.0, "Rock")),
+    col = g.custom(ROCK_COLOR, [("M", tm), ("N1", n1), ("N2", n2), ("Dark", g.vec("DarkColor", (0.05, 0.05, 0.055), "Rock")),
+                                ("Light", g.vec("LightColor", (0.40, 0.36, 0.31), "Rock")), ("Tint", g.vec("TintColor", (0.20, 0.36, 0.40), "Rock")),
+                                ("TintAmt", g.scalar("TintAmount", 0.12, "Rock")), ("Silt", g.vec("SiltColor", (0.46, 0.50, 0.46), "Rock")),
+                                ("SiltAmt", g.scalar("SiltAmount", 0.85, "Rock")), ("WP", wp), ("WaterZ", g.scalar("WaterZ", 0.0, "Rock")),
                                 ("WetH", g.scalar("WetHeight", 120.0, "Rock"))], desc="RockColor")
-    rough = g.custom("float wet = 1.0 - saturate((WP.z - WaterZ) / WetH); return lerp(lerp(0.65, 0.92, M.r), 0.18, wet);",
+    rough = g.custom("float wet = 1.0 - saturate((WP.z - WaterZ) / WetH); return lerp(lerp(0.6, 0.9, M.r), 0.15, wet) + (1.0 - M.g)*0.1;",
                      [("WP", wp), ("M", tm), ("WaterZ", g.scalar("WaterZ", 0.0, "Rock")), ("WetH", g.scalar("WetHeight", 120.0, "Rock"))],
                      out=unreal.CustomMaterialOutputType.CMOT_FLOAT1, desc="RockRoughness")
     g.out(col, MP.MP_BASE_COLOR)
@@ -233,9 +297,10 @@ def build_rock():
 
 # --------------------------------------------------------------------------- stone
 STONE_COLOR = r"""
-float3 c = Color * (0.86 + 0.28*(M.g - 0.5));
-c *= lerp(1.0, 0.62, M.r);
-c *= lerp(1.0, 0.78, saturate(M.b*1.3 - 0.35) * Grime);
+float3 c = Color * (0.93 + 0.12*(M.g - 0.5));
+c *= lerp(1.0, 0.78, M.r);
+c *= lerp(1.0, 0.84, saturate(M.b*1.3 - 0.35) * Grime);
+c = lerp(c, c*float3(1.04, 1.0, 0.94), saturate(M.b - 0.3));   // faint warm marble drift
 float low = 1.0 - saturate((WP.z - WaterZ) / 300.0);
 c = lerp(c, c*float3(0.55,0.75,0.78), low*0.6);
 return c;
@@ -249,7 +314,7 @@ def build_stone():
     tm = g.tex("StoneMask", TEX + "/T_Stone_M", uv)
     tn = g.tex("StoneNormal", TEX + "/T_Stone_N", uv, normal=True)
     wp = g.node(unreal.MaterialExpressionWorldPosition)
-    col = g.custom(STONE_COLOR, [("M", tm), ("Color", g.vec("StoneColor", (0.62, 0.60, 0.56), "Stone")),
+    col = g.custom(STONE_COLOR, [("M", tm), ("Color", g.vec("StoneColor", (0.70, 0.68, 0.63), "Stone")),
                                  ("Grime", g.scalar("Grime", 0.6, "Stone")), ("WP", wp), ("WaterZ", g.scalar("WaterZ", 0.0, "Stone"))], desc="StoneColor")
     g.out(col, MP.MP_BASE_COLOR)
     g.out(g.custom("return lerp(R0, R0+0.2, M.r);", [("M", tm), ("R0", g.scalar("Roughness", 0.62, "Stone"))],
@@ -295,7 +360,7 @@ def build_water():
     g.out(g.scalar("Specular", 0.5, "Water"), MP.MP_SPECULAR)
     g.out(g.scalar("Opacity", 1.0, "Water"), MP.MP_OPACITY)
     wo = g.node(unreal.MaterialExpressionSingleLayerWaterMaterialOutput)
-    g.link(g.vec("Scattering", (0.006, 0.04, 0.045), "Water"), "", wo, "ScatteringCoefficients")
+    g.link(g.vec("Scattering", (0.02, 0.16, 0.15), "Water"), "", wo, "ScatteringCoefficients")
     g.link(g.vec("Absorption", (0.30, 0.04, 0.032), "Water"), "", wo, "AbsorptionCoefficients")
     g.link(g.scalar("PhaseG", 0.2, "Water"), "", wo, "PhaseG")
     finish(m)
@@ -324,6 +389,7 @@ def instance(name, parent, scalars=None, vectors=None):
     path = INST + "/" + name
     mi = unreal.load_asset(path) if EAL.does_asset_exist(path) else AT.create_asset(name, INST, unreal.MaterialInstanceConstant, unreal.MaterialInstanceConstantFactoryNew())
     ML.set_material_instance_parent(mi, parent)
+    ML.clear_all_material_instance_parameters(mi)  # drop overrides tuned for an older master
     for k, v in (scalars or {}).items():
         ML.set_material_instance_scalar_parameter_value(mi, k, v)
     for k, v in (vectors or {}).items():
@@ -334,31 +400,39 @@ def instance(name, parent, scalars=None, vectors=None):
 
 
 def main():
-    cm = build_crystal("M_Crystal_Master")
-    cg = build_crystal("M_Crystal_Glass", translucent=True)
-    rk = build_rock()
-    st = build_stone()
-    gl = build_simple("M_WindowGlow", (0.05, 0.03, 0.01), 0.5, (1.0, 0.58, 0.22), 30.0)
-    dr = build_simple("M_Door", (0.09, 0.055, 0.035), 0.55)
-    wt = build_water()
-    mo = build_mote()
+    # only=crystal|rock|stone|water rebuilds just that master (others are loaded as they are); every
+    # rebuild recompiles shaders and a render taken meanwhile shows fallback materials.
+    only = globals().get("CK_ARGS", {}).get("only", "")
+
+    def get(key, name, fn):
+        if only and only != key:
+            return unreal.load_asset(MASTER + "/" + name)
+        return fn()
+
+    cm = get("crystal", "M_Crystal_Master", lambda: build_crystal("M_Crystal_Master"))
+    cg = get("crystal", "M_Crystal_Glass", lambda: build_crystal("M_Crystal_Glass", translucent=True))
+    rk = get("rock", "M_Rock_Master", build_rock)
+    st = get("stone", "M_Stone_Master", build_stone)
+    gl = get("simple", "M_WindowGlow", lambda: build_simple("M_WindowGlow", (0.05, 0.03, 0.01), 0.5, (1.0, 0.58, 0.22), 30.0))
+    dr = get("simple", "M_Door", lambda: build_simple("M_Door", (0.09, 0.055, 0.035), 0.55))
+    wt = get("water", "M_Water", build_water)
+    mo = get("simple", "M_GlowMote", build_mote)
 
     mi = {}
+    violet = {"BaseTint": (0.58, 0.50, 0.78), "DeepTint": (0.15, 0.08, 0.30), "GlowColor": (0.65, 0.45, 1.0)}
     mi["Crystal_Teal"] = instance("MI_Crystal_Teal", cm)
-    mi["Crystal_White"] = instance("MI_Crystal_White", cm, {"GlowIntensity": 0.9, "IridStrength": 0.55},
-                                   {"BaseTint": (0.48, 0.68, 0.74), "DeepTint": (0.10, 0.30, 0.38)})
-    mi["Crystal_Violet"] = instance("MI_Crystal_Violet", cm, {"IridShift": 0.78, "IridStrength": 0.85, "GlowIntensity": 0.9},
-                                    {"BaseTint": (0.42, 0.33, 0.66), "DeepTint": (0.12, 0.06, 0.26), "GlowColor": (0.65, 0.45, 1.0)})
-    mi["Crystal_Glow"] = instance("MI_Crystal_Glow", cm, {"GlowIntensity": 2.0, "InnerCrack": 1.6}, {"GlowColor": (0.35, 0.95, 1.0)})
-    mi["Crystal_Opal"] = instance("MI_Crystal_Opal", cm, {"IridStrength": 1.0, "IridScale": 1.8, "GlowIntensity": 0.35},
-                                  {"BaseTint": (0.55, 0.58, 0.66)})
-    mi["Crystal_Block"] = instance("MI_Crystal_Block", cm, {"GlowIntensity": 0.3, "IridStrength": 0.95, "IridScale": 1.4, "RoughnessMax": 0.12, "CrackStrength": 0.04, "InnerCrack": 0.12},
-                                   {"BaseTint": (0.13, 0.32, 0.38), "DeepTint": (0.02, 0.07, 0.10)})
-    mi["Crystal_BlockViolet"] = instance("MI_Crystal_BlockViolet", cm, {"GlowIntensity": 0.3, "IridStrength": 1.0, "IridShift": 0.8, "RoughnessMax": 0.12, "CrackStrength": 0.04, "InnerCrack": 0.12},
-                                         {"BaseTint": (0.25, 0.17, 0.42), "DeepTint": (0.05, 0.03, 0.12), "GlowColor": (0.6, 0.45, 1.0)})
+    mi["Crystal_White"] = instance("MI_Crystal_White", cm, {"GlowIntensity": 0.7, "MilkAmount": 0.75, "IridStrength": 0.75},
+                                   {"BaseTint": (0.70, 0.82, 0.86), "DeepTint": (0.20, 0.35, 0.42)})
+    mi["Crystal_Violet"] = instance("MI_Crystal_Violet", cm, {"IridShift": 0.78, "IridStrength": 0.9, "GlowIntensity": 0.6}, violet)
+    mi["Crystal_Glow"] = instance("MI_Crystal_Glow", cm, {"GlowIntensity": 1.8, "InnerCrack": 1.4}, {"GlowColor": (0.35, 0.95, 1.0)})
+    mi["Crystal_Opal"] = instance("MI_Crystal_Opal", cm, {"IridStrength": 1.0, "IridScale": 1.6, "MilkAmount": 0.8, "OpalGlow": 0.6, "GlowIntensity": 0.3},
+                                  {"BaseTint": (0.75, 0.76, 0.82)})
+    block = {"IridStrength": 1.5, "IridScale": 1.2, "MilkAmount": 0.4, "OpalGlow": 0.32, "GlowIntensity": 0.12, "CrackStrength": 0.7, "PatchScale": 0.22}
+    mi["Crystal_Block"] = instance("MI_Crystal_Block", cm, block, {"BaseTint": (0.50, 0.58, 0.62), "DeepTint": (0.06, 0.10, 0.13)})
+    mi["Crystal_BlockViolet"] = instance("MI_Crystal_BlockViolet", cm, dict(block, IridShift=0.8), violet)
     mi["Crystal_Glass"] = instance("MI_Crystal_Glass", cg, {"Opacity": 0.25, "GlowIntensity": 1.5})
     mi["CaveRock"] = instance("MI_CaveRock", rk, {"UVScale": 0.35})
-    mi["Rock"] = instance("MI_Rock", rk, {"TintAmount": 0.25, "UVScale": 0.6}, {"LightColor": (0.14, 0.15, 0.17)})
+    mi["Rock"] = instance("MI_Rock", rk, {"TintAmount": 0.25, "UVScale": 0.6}, {"LightColor": (0.34, 0.31, 0.28)})
     mi["Stone"] = instance("MI_Stone", st)
     mi["StoneTrim"] = instance("MI_StoneTrim", st, {"Grime": 0.35, "Roughness": 0.5}, {"StoneColor": (0.78, 0.77, 0.73)})
     mi["Roof"] = instance("MI_Roof", st, {"UVScale": 2.0, "Grime": 0.8, "Roughness": 0.45}, {"StoneColor": (0.42, 0.55, 0.58)})

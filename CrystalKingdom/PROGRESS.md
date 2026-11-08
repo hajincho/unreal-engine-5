@@ -16,6 +16,7 @@
 | 10 | 렌더 · 원본 비교 | 완료 | `Screenshots/iter01…iter10, final_reference.png`, `compare_reference_iterations.png` |
 | 11 | 품질 개선 반복 | 11회 수행 | `VALIDATION.md` 반복 기록 |
 | 12 | 최적화 · 최종 검증 | 부분 완료 | 측정만 완료, PCG/ISM 전환·LOD 튜닝은 미수행 (`NEXT_STEPS.md`) |
+| 13 | 재질 사실감 패스 | 완료(차이 남음) | `gen_textures.py`, `gen_crystals.py`(베벨), `ck_materials.py`, `Screenshots/mat01…mat10`, `compare_material_pass.png` |
 
 ## 작업 로그 (요약)
 1. UE 5.8.4 / Blender 5.2.3 / RTX 2060 6GB 확인. 빈 블루프린트 프로젝트 생성, Lumen·Nanite·VSM·Python 원격 실행 설정.
@@ -33,3 +34,10 @@
    - 원거리 VSM 누수(북쪽 벽 점선) → Directional Light 끄고 채광구 스포트라이트로 광선 구현.
    - 호수 평면 충돌 때문에 산포 레이가 수면에 맞아 수정이 떠 있던 버그 → 호수 NoCollision 후 재배치.
 8. 충돌 검증 12/12, 독립 실행 성능 측정(1080p/1440p).
+9. 재질 사실감 패스 (2026-11-09, 렌더 10회 반복 `mat01…mat10`):
+   - 텍스처 재생성: 수정 = 도메인 워프한 열린 균열망(닫힌 보로노이 셀 제거) + 우윳빛 구름 + 오팔 패치 필드, 암석 = 능선·워프 층리·드문 균열(자갈 무늬 제거).
+   - 수정 메시 58종에 베벨(인접 모서리의 7%, 2분할, Harden Normals) → 모서리 하이라이트.
+   - `M_Crystal_Master` 재작성: Clear Coat, 오팔 팔레트(보라·파랑·청록·분홍·금), 시차 2층 내부, 거리 페이드, 크랙클 균열.
+   - 문제: Python `MaterialProperty`에 ClearCoat 핀이 없음 → `MakeMaterialAttributes` 경유.
+   - 문제: `delete_all_material_expressions`가 노드를 남겨 물에 SLW 출력 노드가 3개 쌓임 → 컴파일 실패로 수면이 사라짐. 남은 노드를 하나씩 지우도록 수정.
+   - 성능 재측정: 1080p 네이티브 GPU +1.6 ms (`VALIDATION.md` 4절).

@@ -11,6 +11,7 @@ import os
 import random
 import sys
 
+import bpy
 from mathutils import Matrix, Vector
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -220,10 +221,31 @@ def build(name, fn, seed, coll):
     rng = random.Random(seed)
     mb = C.MeshBuilder(name, [MAT])
     fn(mb, rng)
-    ob, ucx = mb.finish(coll, uv_scale=0.25)
+    ob, ucx = mb.finish(coll, uv_scale=0.25, triangulate=False)
+    bevel_edges(ob)
     C.export_asset(ob, ucx, "Crystals")
-    print("BUILT", name, len(ob.data.polygons))
+    dg = bpy.context.evaluated_depsgraph_get()
+    tris = sum(len(p.vertices) - 2 for p in ob.evaluated_get(dg).data.polygons)
+    print("BUILT", name, "tris", tris)
     return ob
+
+
+def bevel_edges(ob, pct=7.0, angle_deg=28.0):
+    """Chamfer every facet edge so it catches a thin highlight (the reference crystals have bright
+    edges). Width scales with each crystal (percent of the adjacent edge); harden_normals keeps the
+    facets themselves flat-shaded while the bevel strip rolls the normal over."""
+    ob.data.shade_smooth()
+    m = ob.modifiers.new("Bevel", "BEVEL")
+    m.offset_type = "PERCENT"
+    m.width_pct = pct
+    m.segments = 2
+    m.limit_method = "ANGLE"
+    m.angle_limit = math.radians(angle_deg)
+    m.harden_normals = True
+    m.use_clamp_overlap = True
+    m.miter_outer = "MITER_ARC"
+    t = ob.modifiers.new("Triangulate", "TRIANGULATE")
+    t.keep_custom_normals = True
 
 
 def main():

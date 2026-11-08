@@ -92,8 +92,8 @@ def import_meshes():
 def import_textures():
     src = os.path.join(PROJ, "SourceArt", "Textures")
     dest = "/Game/CrystalKingdom/Textures"
-    files = sorted(glob.glob(os.path.join(src, "*.png")))
-    tasks = []
+    flt = ARGS.get("filter", "")
+    files = sorted(f for f in glob.glob(os.path.join(src, "*.png")) if flt in os.path.basename(f))
     for f in files:
         t = unreal.AssetImportTask()
         t.set_editor_property("filename", f)
@@ -101,8 +101,7 @@ def import_textures():
         t.set_editor_property("automated", True)
         t.set_editor_property("replace_existing", True)
         t.set_editor_property("save", False)
-        tasks.append(t)
-    unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks(tasks)
+        unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([t])  # one per call (Interchange batches run async)
     for f in files:
         name = os.path.splitext(os.path.basename(f))[0]
         tex = unreal.EditorAssetLibrary.load_asset(dest + "/" + name)
