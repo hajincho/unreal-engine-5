@@ -1,0 +1,10 @@
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+.vs/
+*.sln
+*_BuiltData.uasset
+SourceArt/Blender/__pycache__/
+Scripts/**/__pycache__/
+SourceArt/Blender/*.blend1
