@@ -33,14 +33,15 @@ def frame_from_dir(d):
 
 
 def crystal(mb, base, direction, length, radius, rng, sides=None, tip="point", twist=0.0,
-            taper=0.12, rings=None, flat_top_tilt=0.35, sink=0.6, mat=MAT):
+            taper=0.12, rings=None, flat_top_tilt=0.35, sink=0.6, mat=MAT, rad_jit=(0.72, 1.12), ang_jit=0.35, spin=None):
     """Add one crystal to MeshBuilder mb. base/direction in builder-local space."""
     sides = sides or rng.choice([5, 6, 6, 6, 6, 7, 8])
     # irregular section
     angs = []
+    a_off = 0.0 if spin is None else spin   # None keeps the original random stream for existing assets
     for i in range(sides):
-        angs.append(2 * math.pi * i / sides + rng.uniform(-0.35, 0.35) * math.pi / sides)
-    rads = [radius * rng.uniform(0.72, 1.12) for _ in range(sides)]
+        angs.append(a_off + 2 * math.pi * i / sides + rng.uniform(-ang_jit, ang_jit) * math.pi / sides)
+    rads = [radius * rng.uniform(*rad_jit) for _ in range(sides)]
     tip_len = length * rng.uniform(0.12, 0.28) if tip in ("point", "chisel") else 0.0
     body = length - tip_len
     nr = rings or max(3, min(14, int(body / max(radius * 0.9, 0.05)) + 2))
@@ -172,6 +173,34 @@ def column_mass(mb, rng, w, d, hmin, hmax, spacing):
                 tip=tip, twist=rng.uniform(-0.05, 0.05), taper=rng.uniform(0.0, 0.08), flat_top_tilt=rng.uniform(0.1, 0.6))
 
 
+def hex_cliff(mb, rng, w, d, h_front, h_back, r):
+    """Stepped cliff of tightly packed, near-vertical regular hexagonal columns (the reference's crystal walls).
+    Honeycomb packing; heights rise in terraces from the low front (-Y in Blender = +Y in UE after the FBX
+    mirror) to the tall back; most tops are flat cuts, a few short points / broken stumps."""
+    pitch = r * 1.86                      # centre spacing: columns touch with a thin seam
+    row_h = pitch * math.sqrt(3) / 2
+    steps = rng.randint(3, 5)             # terrace levels front->back
+    ny = int(d / row_h) + 1
+    nx = int(w / pitch) + 1
+    for j in range(ny):
+        y = -d / 2 + j * row_h
+        t = j / max(ny - 1, 1)            # 0 front .. 1 back
+        level = math.floor(t * steps + rng.uniform(-0.35, 0.35)) / max(steps - 1, 1)
+        for i in range(nx):
+            x = -w / 2 + i * pitch + (pitch / 2 if j % 2 else 0.0)
+            edge = abs(x) / (w / 2)       # ragged, lower side ends
+            if edge > 0.92 and rng.random() < 0.5:
+                continue
+            h = C.lerp(h_front, h_back, min(1.0, max(0.0, level))) * (1.0 - 0.45 * edge ** 2) * rng.uniform(0.82, 1.12)
+            if rng.random() < 0.12:       # occasional tall spire breaking the terrace line
+                h *= rng.uniform(1.25, 1.6)
+            tip = rng.choices(["flat", "point", "broken"], weights=(0.72, 0.18, 0.10))[0]
+            rr = r * rng.uniform(0.9, 1.0)
+            crystal(mb, (x + rng.uniform(-0.05, 0.05) * r, y, -1.0), cone_dir(rng, (0, 0, 1), 0.025), h, rr, rng, sides=6,
+                    tip=tip, taper=0.0, twist=0.0, flat_top_tilt=rng.uniform(0.05, 0.3), rad_jit=(0.97, 1.03), ang_jit=0.04,
+                    spin=0.0, sink=0.3)
+
+
 def branching(mb, rng, L, R):
     d0 = cone_dir(rng, (0, 0, 1), 0.15)
     crystal(mb, (0, 0, 0), d0, L, R, rng, tip="point")
@@ -186,13 +215,15 @@ def branching(mb, rng, L, R):
 
 def block(mb, rng, R, H):
     """Chunky hex column stump cut flat — the foreground rubble blocks of the reference."""
-    crystal(mb, (0, 0, -0.3), cone_dir(rng, (0, 0, 1), 0.25), H, R, rng, sides=rng.choice([5, 6, 6, 7]),
-            tip=rng.choice(["flat", "flat", "broken"]), taper=0.0, rings=rng.randint(3, 5), flat_top_tilt=rng.uniform(0.15, 0.5), sink=0.2)
-    for _ in range(rng.randint(0, 2)):
+    # plan step 7: regular hexagonal stumps with flat (slightly slanted) cuts, like the reference foreground
+    crystal(mb, (0, 0, -0.3), cone_dir(rng, (0, 0, 1), 0.12), H, R, rng, sides=6, tip=rng.choice(["flat", "flat", "flat", "broken"]),
+            taper=0.0, rings=rng.randint(3, 4), flat_top_tilt=rng.uniform(0.08, 0.3), sink=0.2, rad_jit=(0.95, 1.04), ang_jit=0.06,
+            spin=rng.uniform(0, 1.0))
+    for _ in range(rng.randint(1, 3)):
         a = rng.uniform(0, 2 * math.pi)
-        base = Vector((math.cos(a), math.sin(a), 0)) * R * 1.3
-        crystal(mb, base, cone_dir(rng, (0, 0, 1), 0.5), H * rng.uniform(0.3, 0.7), R * rng.uniform(0.35, 0.6), rng,
-                tip=rng.choice(["flat", "broken"]), taper=0.0, rings=3)
+        base = Vector((math.cos(a), math.sin(a), 0)) * R * 1.75
+        crystal(mb, base, cone_dir(rng, (0, 0, 1), 0.15), H * rng.uniform(0.35, 0.85), R * rng.uniform(0.45, 0.7), rng, sides=6,
+                tip=rng.choice(["flat", "flat", "broken"]), taper=0.0, rings=3, rad_jit=(0.95, 1.04), ang_jit=0.06, spin=rng.uniform(0, 1.0))
 
 
 def opal(mb, rng, L, R):
@@ -238,7 +269,7 @@ def bevel_edges(ob, pct=7.0, angle_deg=28.0):
     m = ob.modifiers.new("Bevel", "BEVEL")
     m.offset_type = "PERCENT"
     m.width_pct = pct
-    m.segments = 2
+    m.segments = 1   # was 2: one chamfer still catches the edge highlight; ~35% fewer triangles (matters on non-Nanite GPUs)
     m.limit_method = "ANGLE"
     m.angle_limit = math.radians(angle_deg)
     m.harden_normals = True
@@ -274,6 +305,9 @@ def main():
         specs.append(("SM_Crystal_Opal_%02d" % (i + 1), lambda mb, r: opal(mb, r, r.uniform(3, 7), r.uniform(0.7, 1.3))))
     for i in range(6):
         specs.append(("SM_Crystal_ColumnMass_%02d" % (i + 1), lambda mb, r: column_mass(mb, r, r.uniform(22, 40), r.uniform(14, 26), 15, r.uniform(70, 130), r.uniform(3.5, 6.0))))
+    for i in range(6):  # plan step 3: reference-style hex column cliffs
+        specs.append(("SM_Crystal_HexCliff_%02d" % (i + 1), lambda mb, r: hex_cliff(mb, r, r.uniform(30, 46), r.uniform(14, 22),
+                                                                                   r.uniform(8, 18), r.uniform(55, 105), r.uniform(1.8, 2.8))))
     for i in range(5):
         specs.append(("SM_Crystal_Block_%02d" % (i + 1), lambda mb, r: block(mb, r, r.uniform(1.1, 2.0), r.uniform(1.2, 3.0))))
     for i in range(6):
@@ -283,7 +317,7 @@ def main():
         if only and only not in name:
             continue
         build(name, fn, 1000 + k * 17, coll)
-    C.save_blend("CK_Crystals")
+    C.save_blend("CK_Crystals" if not only else "CK_Crystals_" + only)   # partial runs must not overwrite the full .blend
 
 
 if __name__ == "__main__":

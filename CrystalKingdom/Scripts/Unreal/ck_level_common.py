@@ -121,3 +121,42 @@ def far_from(x, y, zones):
         if (x - cx) ** 2 + (y - cy) ** 2 < r * r:
             return False
     return True
+
+
+# --------------------------------------------------------------------------- terrain-only height
+_TERRAIN = None
+
+
+def _terrain():
+    global _TERRAIN
+    if _TERRAIN is None:
+        _TERRAIN = []
+        for a in EAS.get_all_level_actors():
+            f = str(a.get_folder_path())
+            if (f.startswith("CK/Cave") or f.startswith("CK/Rocks/Terraces")) and isinstance(a, unreal.StaticMeshActor):
+                o, e = a.get_actor_bounds(False)
+                _TERRAIN.append((a.static_mesh_component, o.x - e.x, o.x + e.x, o.y - e.y, o.y + e.y))
+    return _TERRAIN
+
+
+def reset_terrain_cache():
+    global _TERRAIN
+    _TERRAIN = None
+
+
+def ground_z(x_m, y_m, top_m=115.0, bottom_m=-40.0):
+    """Highest terrain (cave shell/floor + rock terraces) under (x, y) in metres, ignoring buildings, crystals,
+    walls and roads. None outside the cave. Uses per-component traces so scatter on top never hides the ground."""
+    x, y = x_m * M, y_m * M
+    best = None
+    for comp, x0, x1, y0, y1 in _terrain():
+        if not (x0 <= x <= x1 and y0 <= y <= y1):
+            continue
+        r = comp.line_trace_component(unreal.Vector(x, y, top_m * M), unreal.Vector(x, y, bottom_m * M), True, False, False)
+        # returns (location, normal, bone, HitResult) on a hit, None otherwise
+        if isinstance(r, tuple) and r[1].length() > 0.5:
+            z = r[0].z / M
+            # the cave shell's ceiling is terrain too: only accept hits below 120 m (ceiling starts ~135 m)
+            if z < 120 and (best is None or z > best):
+                best = z
+    return best

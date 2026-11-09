@@ -14,6 +14,10 @@ if cam is None:
 phase = ARGS.get("phase", "pilot")
 if phase == "pilot":
     LES.editor_set_game_view(True)
+    try:  # already piloting another camera -> pilot_level_actor is ignored, so eject first
+        LES.eject_pilot_level_actor()
+    except Exception:
+        pass
     LES.pilot_level_actor(cam)
     try:
         unreal.SystemLibrary.execute_console_command(None, "r.ScreenPercentage 100")

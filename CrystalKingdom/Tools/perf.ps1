@@ -1,25 +1,30 @@
 # Standalone (-game) performance capture with the CSV profiler.
-# usage: & Tools\perf.ps1 <ResX> <ResY> <Label> [Seconds]
-param([int]$ResX = 1920, [int]$ResY = 1080, [string]$Label = "1080p", [int]$Seconds = 100, [int]$ScreenPct = 100)
+# usage: & Tools\perf.ps1 <ResX> <ResY> <Label> [Seconds] [ScreenPct]
+# The open editor is minimized while measuring: a visible editor viewport renders Lumen on the same GPU
+# and cut the standalone result from ~60 fps to ~4 fps. It is restored afterwards.
+param([int]$ResX = 1920, [int]$ResY = 1080, [string]$Label = "1080p", [int]$Seconds = 150, [int]$ScreenPct = 100, [string]$Extra = "")
 $root = Split-Path -Parent $PSScriptRoot
 $csvDir = Join-Path $root "Saved\Profiling\CSV"
 $before = @(Get-ChildItem $csvDir -Filter *.csv -ErrorAction SilentlyContinue | ForEach-Object FullName)
+
+Add-Type -ErrorAction SilentlyContinue @"
+using System; using System.Runtime.InteropServices;
+public class CKWinP { [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd); }
+"@
+$ed = Get-Process UnrealEditor -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+if ($ed) { [CKWinP]::ShowWindow($ed.MainWindowHandle, 6) | Out-Null }   # SW_MINIMIZE
+
 $exe = "C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe"
 $uproj = Join-Path $root "CrystalKingdom.uproject"
 $args = @("`"$uproj`"", "-game", "-windowed", "-ResX=$ResX", "-ResY=$ResY", "-nosplash", "-NoVerifyGC", "-csvGpuStats",
-          "-ExecCmds=`"t.MaxFPS 0,r.VSync 0,r.ScreenPercentage $ScreenPct,CsvProfile Frames=900`"", "-log=Perf_$Label.log")
+          "-ExecCmds=`"t.MaxFPS 0,r.VSync 0,r.ScreenPercentage $ScreenPct$(if ($Extra) { ',' + $Extra }),CsvProfile Frames=900`"", "-log=Perf_$Label.log")
 $p = Start-Process -FilePath $exe -ArgumentList $args -PassThru
 Start-Sleep $Seconds
 Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
 Start-Sleep 3
-$csv = Get-ChildItem $csvDir -Filter *.csv -ErrorAction SilentlyContinue | Where-Object { $before -notcontains $_.FullName } | Sort-Object LastWriteTime | Select-Object -Last 1
-if (-not $csv) { Write-Output "NO CSV"; exit 1 }
-$rows = Import-Csv $csv.FullName | Where-Object { $_.FrameTime -and $_.FrameTime -match '^[0-9.]+$' }
-$rows = $rows | Select-Object -Skip 120   # drop warm-up frames (shader/Lumen settling)
-$ft = $rows | ForEach-Object { [double]$_.FrameTime }
-$gpu = $rows | Where-Object { $_.GPUTime -match '^[0-9.]+$' } | ForEach-Object { [double]$_.GPUTime }
-$avg = ($ft | Measure-Object -Average).Average
-$sorted = $ft | Sort-Object
-$p95 = $sorted[[int]([math]::Floor($sorted.Count * 0.95))]
-$gavg = if ($gpu) { ($gpu | Measure-Object -Average).Average } else { 0 }
-"{0}: frames={1} avg_frame={2:N2} ms ({3:N1} fps)  p95_frame={4:N2} ms  avg_gpu={5:N2} ms  csv={6}" -f $Label, $ft.Count, $avg, (1000 / $avg), $p95, $gavg, $csv.Name
+if ($ed) { [CKWinP]::ShowWindow($ed.MainWindowHandle, 9) | Out-Null }   # SW_RESTORE
+$csv = Get-ChildItem $csvDir -Filter *.csv -ErrorAction SilentlyContinue | Where-Object { $before -notcontains $_.FullName -and $_.Length -gt 0 } | Sort-Object LastWriteTime | Select-Object -Last 1
+if (-not $csv) { Write-Output "NO CSV (capture did not finish within ${Seconds}s?)"; exit 1 }
+# Import-Csv fails on duplicate column names in newer captures -> python summariser
+$py = "C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\ThirdParty\Python3\Win64\python.exe"
+& $py -I (Join-Path $PSScriptRoot "csvstats.py") $csv.FullName $Label 120
