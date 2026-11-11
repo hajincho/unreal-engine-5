@@ -18,9 +18,57 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ck_common as C  # noqa: E402
 
 ST, TR, RF, GL, DR = "M_Stone", "M_StoneTrim", "M_Roof", "M_WindowGlow", "M_Door"
+MT, PL, FL, FB = "M_Metal", "M_Plant", "M_Flower", "M_Fabric"   # facade accessories: ironwork, window boxes, banners
 FH = 4.2   # house storey (floor-to-floor) in metres - was 6.0, which made houses read ~1.5x too tall
 TFH = 4.5  # tower storey
-MATS = [ST, TR, RF, GL, DR]
+MATS = [ST, TR, RF, GL, DR, MT, PL, FL, FB]
+
+
+def window_box(mb, x0, x1, z, rnd):
+    """Planted window box on brackets under a sill."""
+    w = x1 - x0 + 0.3
+    xc = (x0 + x1) / 2
+    mb.box(TR, (xc, -0.32, z - 0.12), (w, 0.36, 0.24))
+    for x in (x0 + 0.05, x1 - 0.05):
+        mb.box(MT, (x, -0.2, z - 0.32), (0.05, 0.3, 0.05))
+    for k in range(int(w / 0.22)):
+        bx = x0 - 0.1 + (k + 0.5) * w / int(w / 0.22)
+        h = 0.15 + 0.12 * rnd.random()
+        mb.lathe(PL, (bx, -0.32, z), [(0.0, 0.0), (0.12, 0.04), (0.1, h * 0.7), (0.0, h)], sides=5)
+        if rnd.random() < 0.6:
+            mb.lathe(FL, (bx + 0.04, -0.36, z + h * 0.8), [(0.0, 0.0), (0.06, 0.03), (0.0, 0.06)], sides=5)
+
+
+def shutters(mb, x0, x1, z0, z1):
+    for x, sgn in ((x0, -1), (x1, 1)):
+        mb.box(DR, (x + sgn * 0.33, -0.1, (z0 + z1) / 2), (0.55, 0.06, z1 - z0))
+        for zz in (z0 + 0.25, z1 - 0.25):
+            mb.box(MT, (x + sgn * 0.33, -0.14, zz), (0.5, 0.02, 0.04))
+        for k in range(3):
+            mb.box(DR, (x + sgn * 0.33, -0.135, z0 + (k + 0.5) * (z1 - z0) / 3), (0.45, 0.02, 0.05))
+
+
+def wall_lantern(mb, x, z):
+    mb.box(MT, (x, -0.06, z), (0.14, 0.12, 0.3))
+    mb.box(MT, (x, -0.25, z + 0.12), (0.04, 0.35, 0.04))
+    mb.box(GL, (x, -0.42, z - 0.12), (0.2, 0.2, 0.3))
+    mb.cyl(MT, (x, -0.42, z + 0.03), 0.16, 0.12, sides=4, r_top=0.02, smooth=False)
+
+
+def drainpipe(mb, x, y, h):
+    mb.cyl(MT, (x, y, 0.0), 0.07, h, sides=8)
+    mb.box(MT, (x, y, h), (0.3, 0.3, 0.2))
+    for k in range(int(h / 2.0)):
+        mb.cyl(MT, (x, y, 0.8 + k * 2.0), 0.1, 0.06, sides=8)
+
+
+def banner(mb, x, y, z, h=4.0, w=1.3, rz=0.0):
+    mb.push(T(x, y, z, rz))
+    mb.cyl(MT, (-w / 2 - 0.1, -0.3, 0.0), 0.04, 0.04, sides=6)
+    mb.box(MT, (0, -0.3, 0.0), (w + 0.3, 0.05, 0.05))
+    mb.slab_xz([(-w / 2, 0.0), (w / 2, 0.0), (w / 2, -h), (0.0, -h - 0.5), (-w / 2, -h)], -0.32, -0.27, mat=FB)
+    mb.slab_xz([(-w / 2 + 0.1, -0.2), (w / 2 - 0.1, -0.2), (w / 2 - 0.1, -0.35), (-w / 2 + 0.1, -0.35)], -0.335, -0.32, mat=TR)
+    mb.pop()
 
 
 def T(x=0.0, y=0.0, z=0.0, rz=0.0, s=1.0):
@@ -175,6 +223,10 @@ def window_rect(mb, w=4.0, h=6.0, t=0.8):
         mb.box(TR, (x, -0.12, oz0 - 0.32), (0.22, 0.24, 0.32))
     mb.slab_xz([(ox0 - 0.35, oz1 + 0.24), (ox1 + 0.35, oz1 + 0.24), ((ox0 + ox1) / 2, oz1 + min(0.95, h - oz1 - 0.55))], -0.28, -0.02, mat=TR)
     xz_face(mb, GL, [(ox0, oz0), (ox1, oz0), (ox1, oz1), (ox0, oz1)], t * 0.55)
+    if h < 5.5:   # domestic storey: wooden shutters, and a planted window box on most windows
+        shutters(mb, ox0, ox1, oz0, oz1)
+        if random.random() < 0.7:
+            window_box(mb, ox0, ox1, oz0 - 0.16, random)
     mb.box(TR, ((ox0 + ox1) / 2, t * 0.5, (oz0 + oz1) / 2), (0.08, 0.1, oz1 - oz0))
     mb.box(TR, ((ox0 + ox1) / 2, t * 0.5, oz0 + (oz1 - oz0) * 0.62), (ox1 - ox0, 0.1, 0.08))
     plinth(mb, 0, w)
@@ -300,6 +352,8 @@ def door_house(mb, w=4.0, h=4.2, t=0.8):
     for x in (w / 2 - 0.9, w / 2 + 0.9):
         mb.box(TR, (x, -0.3, zs + 0.7), (0.16, 0.5, 0.4))
     mb.box(TR, (w / 2, -0.5, 0.08), (2.0, 1.0, 0.16))                   # door step
+    for x in (w / 2 - 1.25, w / 2 + 1.25):
+        wall_lantern(mb, x, 2.1)
     plinth(mb, 0, w)
     cornice(mb, 0, w, h - 0.42)
 
@@ -643,6 +697,9 @@ def bldg_tower_round(mb, rng, r=5.5, h=36.0, sides=20):
     for k in range(4):
         a = 2 * math.pi * k / 4 + math.pi / 4
         corner_turret(mb, (rt + 0.9) * math.cos(a), (rt + 0.9) * math.sin(a), zt - 3.0, 4.0, 0.9)
+    for k in range(3):   # long banners down the shaft
+        a = 2 * math.pi * k / 3 - math.pi / 2
+        banner(mb, rt * 1.02 * math.cos(a), rt * 1.02 * math.sin(a), zt - 2.0, h=7.0, w=1.4, rz=math.degrees(a) + 90)
     mb.cyl(ST, (0, 0, zt), rt + 0.6, 0.6, sides=sides, smooth=False)
     for k in range(10):
         a = 2 * math.pi * k / 10
@@ -699,6 +756,10 @@ def bldg_house(mb, rng):
         mb.cyl(TR, (W / 2, D / 2, H + FH * 0.5), min(nx, ny) * 1.6 + 0.12, 0.2, sides=16)
         place(mb, roof_cone, W / 2, D / 2, H + FH, r=min(nx, ny) * 1.6, h=5.5)
         place(mb, crenels, 0, 0, H, L=W, t=0.5)
+    drainpipe(mb, 0.25, -0.25, H)
+    drainpipe(mb, W - 0.25, D + 0.25, H)
+    if rng.random() < 0.35:
+        banner(mb, W / 2 + 2.0, 0.0, H - 0.6, h=min(3.2, H - 2.5), w=1.1)
     # corbelled corner turrets on the front corners
     if rng.random() < 0.7:
         for x in ((0.0, W) if rng.random() < 0.5 else (W,)):
@@ -707,6 +768,216 @@ def bldg_house(mb, rng):
     for l in range(1, lv):
         if rng.random() < 0.6:
             place(mb, balcony, 0.8, 0, l * FH, w=W - 1.6, d=1.3)
+
+
+
+# --------------------------------------------------------------------------- new house family (H1 H5 H6 H7 H8 H9)
+def shell(mb, rng, nx, ny, lv, bw=4.0, h=FH, door_bays=(None,), skip=(), choices=None):
+    """Closed block of facade modules nx x ny bays, lv storeys, front = -Y. Returns (W, D, H).
+    door_bays: front bay indices on the ground floor that get a street door; skip: {(level, side, bay)}."""
+    choices = choices or [window_rect, window_rect, window_gothic, wall_plain]
+    W, D, H = nx * bw, ny * bw, lv * h
+    prev = mb.ucx_enabled
+    mb.ucx_enabled = False
+    for l in range(lv):
+        for side in range(4):
+            n = nx if side % 2 == 0 else ny
+            for i in range(n):
+                if (l, side, i) in skip:
+                    continue
+                fn = rng.choice(choices)
+                if l == 0 and side == 0 and i in door_bays:
+                    fn = door_house
+                ox, oy, rz = [(i * bw, 0, 0), (W, i * bw, 90), (W - i * bw, D, 180), (0, D - i * bw, 270)][side]
+                place(mb, fn, ox, oy, l * h, rz=rz, w=bw, h=h)
+    for l in range(lv + 1):
+        mb.box(ST, (W / 2, D / 2, l * h - 0.2), (W, D, 0.4))
+    for l in range(1, lv):
+        string_course(mb, 0, 0, W, D, l * h - 0.3)
+    string_course(mb, 0, 0, W, D, 0.6, d=0.3)
+    for (x, y, sx, sy) in ((0, 0, -1, 1), (W, 0, 1, 1), (W, D, 1, -1), (0, D, -1, -1)):
+        quoins(mb, x, y, 0.0, H, sx, -sy)
+    mb.ucx_enabled = prev
+    return W, D, H
+
+
+def mansard(mb, x0, y0, x1, y1, z, h1=4.0, inset=1.5, h2=1.4, dormers=True, skip_front=None):
+    """Mansard roof: steep lower slopes (with dormers) and a low hipped cap."""
+    a = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    b = [(x0 + inset, y0 + inset), (x1 - inset, y0 + inset), (x1 - inset, y1 - inset), (x0 + inset, y1 - inset)]
+    mb.box(TR, ((x0 + x1) / 2, (y0 + y1) / 2, z + 0.12), (x1 - x0 + 0.6, y1 - y0 + 0.6, 0.24))   # eaves cornice
+    for k in range(4):
+        p0, p1, q1, q0 = a[k], a[(k + 1) % 4], b[(k + 1) % 4], b[k]
+        mb.face([(p0[0], p0[1], z + 0.24), (p1[0], p1[1], z + 0.24), (q1[0], q1[1], z + h1), (q0[0], q0[1], z + h1)], RF)
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    ridge = max(0.0, ((x1 - x0) - (y1 - y0)) / 2)
+    r0, r1 = (cx - ridge * 0.9, cy), (cx + ridge * 0.9, cy)
+    for k in range(4):
+        q0, q1 = b[k], b[(k + 1) % 4]
+        top = [r0, r1, r1, r0][k], [r1, r1, r0, r0][k]
+        mb.face([(q0[0], q0[1], z + h1), (q1[0], q1[1], z + h1), (top[0][0], top[0][1], z + h1 + h2)], RF) if k % 2 else \
+            mb.face([(q0[0], q0[1], z + h1), (q1[0], q1[1], z + h1), (top[1][0], top[1][1], z + h1 + h2), (top[0][0], top[0][1], z + h1 + h2)], RF)
+    mb.box(TR, (cx, cy, z + h1 + 0.05), (x1 - x0 - 2 * inset + 0.3, y1 - y0 - 2 * inset + 0.3, 0.12))
+    if dormers:
+        for k in range(int((x1 - x0) / 4.0)):
+            x = x0 + 2.0 + k * 4.0
+            for side, yy, rz in ((0, y0 + inset * 0.45, 0), (1, y1 - inset * 0.45, 180)):
+                if side == 0 and skip_front and skip_front[0] < x < skip_front[1]:
+                    continue
+                mb.push(T(x, yy, z + 0.6, rz))
+                dormer(mb, 1.4, 1.9)
+                mb.pop()
+
+
+def bldg_town(mb, rng, lv=3, bw=3.2):
+    """H1 narrow town house: 2 bays wide, gable to the street, oculus, window boxes."""
+    mb.add_ucx([(x, y, z) for x in (0, 2 * bw) for y in (0, 3 * bw) for z in (0, lv * FH)], force=True)
+    W, D, H = shell(mb, rng, 2, 3, lv, bw=bw, door_bays=(0,), choices=[window_rect, window_rect, window_gothic])
+    ph = W * 0.85
+    place(mb, roof_gable, 0, 0, H, w=W, d=D, ph=ph)
+    ring_xz(mb, TR, W / 2, H + ph * 0.38, 0.5, 0.13, -0.75, -0.45, n=16)
+    xz_face(mb, GL, [(W / 2 + 0.5 * math.cos(2 * math.pi * i / 16), H + ph * 0.38 + 0.5 * math.sin(2 * math.pi * i / 16)) for i in range(16)], -0.6)
+    chimney(mb, W * 0.7, D * 0.75, H + ph * 0.35, 3.2)
+    drainpipe(mb, W - 0.2, -0.25, H)
+    if rng.random() < 0.6:
+        place(mb, balcony, 0.6, 0, FH, w=W - 1.2, d=1.2)
+
+
+def bldg_town_tall(mb, rng):
+    bldg_town(mb, rng, lv=4, bw=3.0)
+
+
+def bldg_manor(mb, rng):
+    """H5 grand manor: 7 x 4 bays, 3 storeys + mansard, central pedimented pavilion with balcony, end pavilions."""
+    nx, ny, lv = 7, 4, 3
+    mb.add_ucx([(x, y, z) for x in (0, nx * 4) for y in (-1.6, ny * 4) for z in (0, lv * FH + 5.5)], force=True)
+    W, D, H = shell(mb, rng, nx, ny, lv, door_bays=(), skip={(l, 0, i) for l in range(lv) for i in (2, 3, 4)})
+    mansard(mb, 0, 0, W, D, H, h1=4.2, inset=1.6, h2=1.6, skip_front=(7.5, 20.5))
+    # central avant-corps: 3 bays, 1.6 m proud of the facade, taller, with pediment and portal
+    mb.push(T(8.0, -1.6, 0))
+    w2, d2, h2 = shell(mb, rng, 3, 1, lv, door_bays=(1,), choices=[window_gothic, window_rect])
+    mb.slab_xz([(-0.4, h2), (w2 + 0.4, h2), (w2 / 2, h2 + 3.2)], -0.2, d2, mat=TR)          # pediment
+    ring_xz(mb, TR, w2 / 2, h2 + 1.2, 0.7, 0.15, -0.35, -0.2, n=16)
+    xz_face(mb, GL, [(w2 / 2 + 0.7 * math.cos(2 * math.pi * i / 16), h2 + 1.2 + 0.7 * math.sin(2 * math.pi * i / 16)) for i in range(16)], -0.3)
+    for x in (-0.2, w2 + 0.2):
+        finial(mb, x, -0.1, h2 + 0.1, 0.8)
+    finial(mb, w2 / 2, -0.1, h2 + 3.1, 1.0)
+    place(mb, balcony, 1.0, 0, FH, w=w2 - 2.0, d=1.8)
+    for x in (0.15, w2 - 0.15):                            # giant pilasters
+        mb.box(TR, (x, -0.2, h2 / 2), (0.5, 0.4, h2))
+    mb.pop()
+    for x in (0.0, W - 8.0):                               # end pavilions: slightly proud, own balustraded parapet
+        mb.box(TR, (x + 4.0, -0.35, H - 0.2), (8.4, 0.7, 0.4))
+        for y in (D * 0.3, D * 0.7):
+            chimney(mb, x + 4.0, y, H + 3.0, 3.5)
+    for x in (0.3, W - 0.3):
+        drainpipe(mb, x, -0.25, H)
+
+
+def bldg_courtyard(mb, rng):
+    """H6 courtyard palace: two 3-storey wings and a back range round a forecourt, gate wall with arched gateway."""
+    lv = 3
+    W, D = 40.0, 28.0
+    mb.add_ucx([(x, y, z) for x in (0, W) for y in (0, D) for z in (0, lv * FH + 5)], force=True)
+    # back range (10 x 3 bays)
+    mb.push(T(0, 16.0, 0))
+    wb, db, hb = shell(mb, rng, 10, 3, lv, door_bays=())
+    place(mb, roof_gable, wb, 0, hb, rz=90, w=db, d=wb, ph=5.0)
+    for x in (8, 20, 32):
+        chimney(mb, x, db * 0.5, hb + 2.0, 3.0)
+    mb.pop()
+    # side wings (3 x 4 bays) facing the court
+    for wx in (0.0, 28.0):
+        mb.push(T(wx, 0, 0))
+        ww, dw, hw = shell(mb, rng, 3, 4, lv, door_bays=())
+        place(mb, roof_gable, 0, 0, hw, w=ww, d=dw, ph=5.0)
+        corner_turret(mb, 0.0 if wx == 0 else ww, 0.0, hw - FH, FH + 0.6, 1.3)
+        mb.pop()
+    # gate wall + arched gateway at the front of the court
+    for xa, xb in ((12.0, 16.1), (23.9, 28.0)):
+        mb.box(ST, ((xa + xb) / 2, 0.3, 2.4), (xb - xa, 0.8, 4.8))
+        mb.box(TR, ((xa + xb) / 2, 0.3, 4.9), (xb - xa + 0.2, 1.0, 0.25))
+    for x in (13.0, 27.0):
+        pinnacle(mb, x, 0.3, 4.9, 0.6)
+    mb.slab_xz(pointed_arch(17.5, 22.5, 3.2, 0.6) + [(22.5, 7.5), (17.5, 7.5)], -0.3, 0.9, mat=TR)
+    for x in (16.8, 23.2):
+        mb.box(TR, (x, 0.3, 3.75), (1.4, 1.2, 7.5))
+        finial(mb, x, 0.3, 7.5, 0.7)
+    door = [(17.5, 0.0), (22.5, 0.0)] + pointed_arch(17.5, 22.5, 3.2, 0.6)[::-1]
+    mb.slab_xz(door, 0.55, 0.7, mat=DR)
+    banner(mb, 20.0, -0.2, 7.0, h=2.2, w=1.6)
+    # paved forecourt with a round planter bed
+    mb.box(TR, (20.0, 8.0, 0.05), (16.0, 15.0, 0.1))
+    mb.cyl(TR, (20.0, 8.0, 0.1), 2.4, 0.6, sides=16)
+    mb.cyl(PL, (20.0, 8.0, 0.7), 1.9, 0.9, sides=10, r_top=0.6)
+
+
+def bldg_tower_house(mb, rng):
+    """H7 house with a full-height round corner tower (low cone, no spire)."""
+    nx, ny, lv = 3, 3, 3
+    mb.add_ucx([(x, y, z) for x in (0, nx * 4 + 2) for y in (-2, ny * 4) for z in (0, (lv + 1) * FH)], force=True)
+    W, D, H = shell(mb, rng, nx, ny, lv, door_bays=(1,))
+    place(mb, roof_gable, 0, 0, H, w=W, d=D, ph=5.0)
+    R, TH = 2.6, H + FH
+    mb.cyl(ST, (W, 0, 0), R, TH, sides=20, smooth=False)
+    for l in range(lv + 1):
+        mb.cyl(TR, (W, 0, l * FH + 0.45 if l == 0 else l * FH - 0.3), R + 0.15, 0.25, sides=20, smooth=False)
+        for a_deg in (-60, 0, 60):
+            a = math.radians(a_deg - 45)
+            mb.push(T(W + R * math.cos(a), R * math.sin(a), l * FH, math.degrees(a) + 90))
+            xz_face(mb, GL, [(-0.4, 1.0), (0.4, 1.0), (0.4, 2.5), (0.0, 2.9), (-0.4, 2.5)], -0.05)
+            mb.pop()
+    mb.cyl(TR, (W, 0, TH), R + 0.4, 0.4, sides=20)
+    place(mb, roof_cone, W, 0, TH + 0.4, r=R + 0.35, h=4.5)
+    chimney(mb, W * 0.3, D * 0.7, H + 2.0, 2.8)
+
+
+def bldg_dome_house(mb, rng):
+    """H8 square two-storey pavilion house: balustraded flat roof, drum and dome."""
+    nx, ny, lv = 3, 3, 2
+    mb.add_ucx([(x, y, z) for x in (0, nx * 4) for y in (0, ny * 4) for z in (0, lv * FH + 7)], force=True)
+    W, D, H = shell(mb, rng, nx, ny, lv, door_bays=(1,), choices=[window_gothic, window_rect])
+    for side, (ox, oy, rz) in enumerate(((0, 0, 0), (W, 0, 90), (W, D, 180), (0, D, 270))):
+        place(mb, balustrade, ox, oy, H + 0.2, rz=rz, L=W if side % 2 == 0 else D)
+    mb.cyl(ST, (W / 2, D / 2, H), 3.0, 2.6, sides=20)
+    for k in range(8):
+        a = 2 * math.pi * k / 8
+        mb.push(T(W / 2 + 3.0 * math.cos(a), D / 2 + 3.0 * math.sin(a), H, math.degrees(a) + 90))
+        xz_face(mb, GL, [(-0.35, 0.6), (0.35, 0.6), (0.35, 1.8), (0.0, 2.2), (-0.35, 1.8)], -0.05)
+        mb.pop()
+    mb.cyl(TR, (W / 2, D / 2, H + 2.6), 3.25, 0.3, sides=20)
+    place(mb, roof_dome, W / 2, D / 2, H + 2.9, r=3.2)
+    for (x, y) in ((0, 0), (W, 0), (W, D), (0, D)):
+        finial(mb, x, y, H + 1.3, 0.6)
+
+
+def bldg_gatehouse(mb, rng):
+    """H9 gatehouse: three storeys bridging an arched passage (8 m wide, 4.6 m high) through the ground floor."""
+    nx, ny, lv = 4, 2, 3
+    W, D = nx * 4.0, ny * 4.0
+    mb.add_ucx([(x, y, z) for x in (0, 5.5) for y in (0, D) for z in (0, lv * FH)], force=True)
+    mb.add_ucx([(x, y, z) for x in (10.5, W) for y in (0, D) for z in (0, lv * FH)], force=True)
+    mb.add_ucx([(x, y, z) for x in (5.5, 10.5) for y in (0, D) for z in (3.8, lv * FH)], force=True)
+    skip = {(0, 0, 1), (0, 0, 2), (0, 2, 1), (0, 2, 2)}
+    W, D, H = shell(mb, rng, nx, ny, lv, door_bays=(0,), skip=skip)
+    zs, a0, a1 = 1.3, 5.5, 10.5                                  # round arch, apex 3.8 m
+    arc = pointed_arch(a0, a1, zs, 0.5, 14)
+    for y0, y1 in ((-0.3, 0.8), (D - 0.8, D + 0.3)):            # arch frames front and back
+        mb.slab_xz([(4.0, 0.0), (a0, 0.0)] + arc + [(a1, 0.0), (12.0, 0.0), (12.0, FH), (4.0, FH)], y0, y1)
+        arch_ring(mb, TR, a0, a1, zs, 0.5, 0.3, y0 - 0.1, y0 + 0.2, n=14)
+    for x in (4.75, 11.25):                                     # passage piers
+        mb.box(ST, (x, D / 2, FH / 2), (1.5, D, FH))
+    for a in range(len(arc) - 1):                               # barrel vault soffit, facing down into the passage
+        p_, q_ = arc[a], arc[a + 1]
+        mb.face([(p_[0], 0.8, p_[1]), (p_[0], D - 0.8, p_[1]), (q_[0], D - 0.8, q_[1]), (q_[0], 0.8, q_[1])], ST)
+    for x in (4.6, 11.4):
+        mb.push(T(0, -0.3, 0))
+        wall_lantern(mb, x, 2.6)
+        mb.pop()
+    place(mb, roof_gable, W, 0, H, rz=90, w=D, d=W, ph=4.5)
+    for x in (0.0, W):
+        corner_turret(mb, x, 0.0, H - FH, FH + 0.4, 1.0)
+    banner(mb, W / 2, -0.3, H - 0.8, h=3.0, w=1.4)
 
 
 def bldg_loggia(mb, rng, bays=7, bay=4.6):
@@ -850,9 +1121,12 @@ def main():
         ("SM_Bldg_House_01", bldg_house), ("SM_Bldg_House_02", bldg_house), ("SM_Bldg_House_03", bldg_house),
         ("SM_Bldg_House_04", bldg_house), ("SM_Bldg_House_05", bldg_house), ("SM_Bldg_House_06", bldg_house),
         ("SM_Bridge_Grand", bridge_grand), ("SM_Bldg_Plaza", plaza), ("SM_Bldg_StairGrand", stair_grand),
+        ("SM_Bldg_Town_01", bldg_town), ("SM_Bldg_Town_02", bldg_town_tall), ("SM_Bldg_Manor", bldg_manor),
+        ("SM_Bldg_Courtyard", bldg_courtyard), ("SM_Bldg_TowerHouse", bldg_tower_house), ("SM_Bldg_DomeHouse", bldg_dome_house),
+        ("SM_Bldg_Gatehouse", bldg_gatehouse),
     ]
     for k, (name, fn) in enumerate(modules):
-        if only and only not in name:
+        if only and not any(o in name for o in only.split(",")):
             continue
         rng = random.Random(10 + k)
         random.seed(10 + k)
@@ -862,7 +1136,7 @@ def main():
         C.export_asset(ob, ucx, "Architecture")
         print("BUILT", name, len(ob.data.polygons), "ucx", len(ucx))
     for k, (name, fn) in enumerate(composites):
-        if only and only not in name:
+        if only and not any(o in name for o in only.split(",")):
             continue
         random.seed(200 + k)
         rng = random.Random(200 + k)
@@ -871,7 +1145,7 @@ def main():
         ob, ucx = mb.finish(coll, uv_scale=0.5, recalc=True)
         C.export_asset(ob, ucx, "Architecture")
         print("BUILT", name, len(ob.data.polygons), "ucx", len(ucx))
-    C.save_blend("CK_Architecture" if not only else "CK_Architecture_" + only)   # partial runs must not overwrite the full .blend
+    C.save_blend("CK_Architecture" if not only else "CK_Architecture_" + only.replace(",", "_")[:40])   # partial runs must not overwrite the full .blend
 
 
 if __name__ == "__main__":

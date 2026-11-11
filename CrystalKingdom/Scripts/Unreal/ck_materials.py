@@ -314,13 +314,13 @@ STONE_COLOR = r"""
 // weathered white-gold marble ashlar (reference buildings): per-block tone + hue, deep joints, veins, rain streaks
 float id = M.g;
 float3 warm = float3(1.06, 0.97, 0.86), cool = float3(0.93, 0.97, 1.04);
-float3 c = Color * lerp(0.93, 1.07, id) * lerp(float3(1,1,1), lerp(warm, cool, frac(id * 7.31)), 0.35);   // subtle: strong per-block tone read as a checkerboard
-c *= lerp(0.92, 1.05, Macro.b);   // (input must not be named MAC: that is a platform #define in the shader headers)                                   // 15 m macro blotches: no flat, even wall
-c *= 1.0 - VeinAmt * 0.14 * smoothstep(0.35, 0.8, V.r);        // fine marble veins
-c *= lerp(1.0, 0.75, saturate(M.r * 1.25));                    // dark recessed mortar joints + chips
+float3 c = Color * lerp(0.88, 1.11, id) * lerp(float3(1,1,1), lerp(warm, cool, frac(id * 7.31)), 0.55);   // subtle: strong per-block tone read as a checkerboard
+c *= lerp(0.88, 1.07, Macro.b);   // (input must not be named MAC: that is a platform #define in the shader headers)                                   // 15 m macro blotches: no flat, even wall
+c *= 1.0 - VeinAmt * 0.21 * smoothstep(0.35, 0.8, V.r);        // fine marble veins
+c *= lerp(1.0, 0.62, saturate(M.r * 1.25));                    // dark recessed mortar joints + chips
 float streak = saturate(S.g * 1.7 - 0.75);
-c *= lerp(1.0, 0.85, streak * Grime);                          // vertical rain / seepage streaks
-c *= lerp(1.0, 0.93, saturate(M.b * 1.3 - 0.35) * Grime);     // surface grime noise
+c *= lerp(1.0, 0.78, streak * Grime);                          // vertical rain / seepage streaks
+c *= lerp(1.0, 0.89, saturate(M.b * 1.3 - 0.35) * Grime);     // surface grime noise
 float low = 1.0 - saturate((WP.z - WaterZ) / 300.0);
 c = lerp(c, c * float3(0.55, 0.75, 0.78), low * 0.6);          // wet tide band at the water line
 return c;
@@ -362,8 +362,8 @@ def build_stone():
                    out=unreal.CustomMaterialOutputType.CMOT_FLOAT1, desc="StoneRough"), MP.MP_ROUGHNESS)
     na = g.tex("StoneNormal", TEX + "/T_Stone_N", uv, normal=True)
     nb = g.tex("StoneDetailN", TEX + "/T_Rock_N", g.mul(uv, g.const(3.1)), normal=True)
-    nrm = g.custom(STONE_NORMAL, [("NA", na), ("NB", nb), ("SA", g.scalar("NormalStrength", 1.8, "Stone")),
-                                  ("SB", g.scalar("DetailNormal", 0.45, "Stone"))],
+    nrm = g.custom(STONE_NORMAL, [("NA", na), ("NB", nb), ("SA", g.scalar("NormalStrength", 2.3, "Stone")),
+                                  ("SB", g.scalar("DetailNormal", 0.65, "Stone"))],
                    out=unreal.CustomMaterialOutputType.CMOT_FLOAT3, desc="StoneNormal")
     g.out(nrm, MP.MP_NORMAL)
     g.out(g.vec("Emissive", (0.0, 0.0, 0.0), "Stone"), MP.MP_EMISSIVE_COLOR)
@@ -461,6 +461,11 @@ def main():
     st = get("stone", "M_Stone_Master", build_stone)
     gl = get("simple", "M_WindowGlow", lambda: build_simple("M_WindowGlow", (0.05, 0.03, 0.01), 0.5, (1.0, 0.58, 0.22), 30.0))
     dr = get("simple", "M_Door", lambda: build_simple("M_Door", (0.09, 0.055, 0.035), 0.55))
+    plant = get("simple", "M_Plant", lambda: build_simple("M_Plant", (0.07, 0.20, 0.07), 0.8))
+    flower = get("simple", "M_Flower", lambda: build_simple("M_Flower", (0.75, 0.28, 0.62), 0.6, (0.35, 0.10, 0.30), 0.6))
+    soil = get("simple", "M_Soil", lambda: build_simple("M_Soil", (0.07, 0.05, 0.035), 0.95))
+    metal = get("simple", "M_Metal", lambda: build_simple("M_Metal", (0.035, 0.035, 0.04), 0.4))
+    fabric = get("simple", "M_Fabric", lambda: build_simple("M_Fabric", (0.36, 0.05, 0.10), 0.85))
     wt = get("water", "M_Water", build_water)
     mo = get("simple", "M_GlowMote", build_mote)
 
@@ -500,12 +505,13 @@ def main():
     mi["Roof"] = instance("MI_Roof", st, {"UVScale": 2.0, "Grime": 0.8, "Roughness": 0.45}, {"StoneColor": (0.42, 0.55, 0.58)})
 
     slot_map = {"M_Crystal": mi["Crystal_Teal"], "M_Rock": mi["Rock"], "M_CaveRock": mi["CaveRock"], "M_Stone": mi["Stone"],
-                "M_StoneTrim": mi["StoneTrim"], "M_Roof": mi["Roof"], "M_WindowGlow": gl, "M_Door": dr, "M_GlowMote": mo}
+                "M_StoneTrim": mi["StoneTrim"], "M_Roof": mi["Roof"], "M_WindowGlow": gl, "M_Door": dr, "M_GlowMote": mo,
+                "M_Plant": plant, "M_Flower": flower, "M_Soil": soil, "M_Metal": metal, "M_Fabric": fabric}
     special = {"CeilingGiant": mi["Crystal_Opal"],   # plan: colourful chandeliers, not milky white
                 "Opal": mi["Crystal_Opal"], "Glow": mi["Crystal_Glass"], "ColumnMass_02": mi["Crystal_Violet"],
                "ColumnMass_05": mi["Crystal_Violet"], "Branch_03": mi["Crystal_Violet"]}
     count = 0
-    for folder in ("Crystals", "Rocks", "Cave", "Architecture", "Props"):
+    for folder in ("Crystals", "Rocks", "Cave", "Architecture", "Props", "Roads"):   # Props: street furniture, Roads: road bodies
         for p in EAL.list_assets("/Game/CrystalKingdom/Meshes/" + folder, recursive=False):
             sm = unreal.load_asset(p)
             if not isinstance(sm, unreal.StaticMesh):

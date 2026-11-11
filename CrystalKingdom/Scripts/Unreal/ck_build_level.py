@@ -86,29 +86,26 @@ ARCH = [  # mesh, x, y, z, yaw, scale
     ("Architecture/SM_Bldg_House_01", 168, 104, 14.0, 180, 1.0),
     ("Architecture/SM_Bldg_House_02", 206, 78, 14.0, 135, 1.0),
     ("Architecture/SM_Bldg_House_03", 176, 76, 14.0, 155, 1.0),
-    ("Architecture/SM_Arch_Gallery", 160, 70, 14.0, 160, 1.0),
-    ("Architecture/SM_Bldg_Plaza", 76, 50, 6.0, 125, 1.0),
+    # removed: SM_Arch_Gallery (160, 70) and SM_Bldg_Plaza (76, 50) - isolated set pieces that connect nothing
     ("Architecture/SM_Bldg_House_04", 104, 84, 6.0, 165, 1.0),
-    ("Architecture/SM_Bldg_House_05", 84, 92, 6.0, 120, 1.0),
-    ("Architecture/SM_Arch_Arcade", 112, 60, 6.0, 150, 1.0),
-    ("Architecture/SM_Arch_Stairs_Curved", 120, 52, 0.0, 200, 1.0),
+    ("Architecture/SM_Bldg_House_05", 84, 92, 4.9, 120, 1.0),
+    # removed: SM_Arch_Arcade (112, 60) + its curved stair (120, 52) - an arcade fragment in the open
     ("Architecture/SM_Bldg_Cathedral", 372, -20, 34.0, 90, 1.0),
     ("Architecture/SM_Bldg_TowerSquare", 326, -80, 24.0, 90, 1.0),
     ("Architecture/SM_Bldg_TowerRound", 352, 82, 22.4, 0, 1.0),
     ("Architecture/SM_Bldg_House_02", 268, -44, 20.0, 100, 1.0),
     ("Architecture/SM_Bldg_House_04", 262, 58, 12.0, 70, 1.0),
-    ("Architecture/SM_Bldg_House_01", 395, 40, 34.0, 120, 1.0),
-    ("Architecture/SM_Bldg_Hall", 300, 70, 8.0, 110, 1.0),
+    ("Architecture/SM_Bldg_House_01", 395, 40, 17.4, 120, 1.0),
+    ("Architecture/SM_Bldg_Hall", 300, 70, 6.5, 110, 1.0),
 ]
 
 
 FAR_CITY = [  # plan step 10: denser far city in the centre of the reference view; snapped onto terrain by trace
-    ("Architecture/SM_Bldg_TowerRound", 362, -6, 100, 1.0), ("Architecture/SM_Bldg_House_03", 368, 18, 80, 1.0),
-    ("Architecture/SM_Bldg_TowerSquare", 410, 18, 95, 1.0), ("Architecture/SM_Bldg_House_05", 356, -32, 110, 1.0),
+    ("Architecture/SM_Bldg_House_05", 356, -32, 110, 1.0),
     ("Architecture/SM_Bldg_Hall", 400, -36, 90, 1.0), ("Architecture/SM_Bldg_House_02", 336, -58, 70, 1.0),
-    ("Architecture/SM_Bldg_House_06", 280, -26, 95, 1.0), ("Architecture/SM_Bldg_TowerRound", 276, -52, 0, 1.0),
-    ("Architecture/SM_Bldg_House_01", 268, 44, 100, 1.0), ("Architecture/SM_Bldg_House_04", 340, 62, 80, 1.0),
-    ("Architecture/SM_Bldg_TowerSquare", 412, 58, 90, 1.0), ("Architecture/SM_Bldg_Loggia", 420, 10, 90, 1.0),
+    ("Architecture/SM_Bldg_House_06", 280, -26, 95, 1.0), ("Architecture/SM_Bldg_TowerHouse", 276, -52, 0, 1.0),
+    ("Architecture/SM_Bldg_House_04", 340, 62, 80, 1.0),
+    ("Architecture/SM_Bldg_Manor", 412, 58, 90, 1.0), ("Architecture/SM_Bldg_Loggia", 420, 10, 90, 1.0),
 ]
 
 
@@ -129,49 +126,88 @@ TERRACE_TOPS = [(48, -50, 4.0), (186, -56, 10.0), (92, 66, 6.0), (190, 92, 14.0)
 
 
 def build_terrace_walls():
-    """Plan step 5: the reference terraces are faced with pale stone walls topped by balustrades."""
+    """Quay walls: one continuous run of wall + balustrade along each terrace's lake-side edge.
+    Edge points are sampled every 4 degrees on the terrain only (ground_z), joined pairwise, and the run
+    is broken wherever the edge jumps (> 2.5 m) so no wall fins stick out into the water."""
+    L.reset_terrain_cache()
     n = 0
     for cx, cy, top in TERRACE_TOPS:
-        face = math.atan2(-cy, (200 - cx) * 0.25) if cx < 300 else math.atan2(-cy * 0.3, -1.0)  # toward the lake / camera
-        for k in range(-14, 15):
-            ang = face + math.radians(k * 5)
+        face = math.atan2(-cy, (200 - cx) * 0.25) if cx < 300 else math.atan2(-cy * 0.3, -1.0)
+        edges = []
+        for k in range(-18, 19):
+            ang = face + math.radians(k * 4)
             dx, dy = math.cos(ang), math.sin(ang)
             edge = None
             for r10 in range(20, 700, 5):
                 r = r10 / 10.0
-                hit = L.trace(v(cx + dx * r, cy + dy * r, top + 40), v(cx + dx * r, cy + dy * r, -15))
-                if not hit or hit[0][2] < top - 1.2:
-                    edge = r - 0.5
+                g = L.ground_z(cx + dx * r, cy + dy * r)
+                if g is None or g < top - 1.2:
+                    edge = r - 0.4
                     break
             if edge is None or edge < 3:
+                edges.append(None)
                 continue
             ex, ey = cx + dx * edge, cy + dy * edge
-            if math.hypot(ex - 14, ey + 6) < 18 or (ex < 30 and abs(ey) < 25):  # grand stair / camera
+            if math.hypot(ex - 14, ey + 6) < 18 or (ex < 45 and -45 < ey < 55):   # grand stair / camera foreground
+                edges.append(None)
                 continue
-            tx, ty = -dy, dx                       # tangent
-            seg = max(1.0, edge * math.radians(5) / 4.0 * 1.08)
-            yaw = math.degrees(math.atan2(ty, tx))
-            h = top + 1.0
-            rows = max(1, int(math.ceil(h / 6.0)))
-            sz = h / (rows * 6.0)
-            for row in range(rows):
-                L.spawn_mesh("Architecture/SM_Arch_Wall_Deco" if row == rows - 1 else "Architecture/SM_Arch_Wall_Plain",
-                             v(ex - tx * 2.0 * seg, ey - ty * 2.0 * seg, -1.0 + row * 6.0 * sz), rot(yaw=yaw), (seg, 1.0, sz),
+            edges.append((ex, ey, edge))
+        # split into continuous runs
+        runs, cur = [], []
+        for e in edges:
+            if e is None or (cur and abs(e[2] - cur[-1][2]) > 2.5):
+                if len(cur) >= 3:
+                    runs.append(cur)
+                cur = [] if e is None else [e]
+            else:
+                cur.append(e)
+        if len(cur) >= 3:
+            runs.append(cur)
+        h = top + 1.0
+        rows = max(1, int(math.ceil(h / 6.0)))
+        sz = h / (rows * 6.0)
+        for run in runs:
+            for (x0, y0, _), (x1, y1, _) in zip(run, run[1:]):
+                d = math.hypot(x1 - x0, y1 - y0)
+                if d < 0.3 or d > 9.0:
+                    continue
+                yaw = math.degrees(math.atan2(y1 - y0, x1 - x0))
+                sx = (d + 0.15) / 4.0
+                for row in range(rows):
+                    L.spawn_mesh("Architecture/SM_Arch_Wall_Deco" if row == rows - 1 else "Architecture/SM_Arch_Wall_Plain",
+                                 v(x0, y0, -1.0 + row * 6.0 * sz), rot(yaw=yaw), (sx, 1.0, sz),
+                                 folder="CK/Architecture/TerraceWalls", collision=False)
+                    n += 1
+                L.spawn_mesh("Architecture/SM_Arch_Balustrade", v(x0, y0, top), rot(yaw=yaw), (sx, 1.0, 1.0),
                              folder="CK/Architecture/TerraceWalls", collision=False)
                 n += 1
-            if k % 8 == 0:  # plan step 5 (halved for iGPU cost): lift the shaded wall faces to pale marble like the reference
-                pl = L.spawn_class(unreal.PointLight, v(ex + dx * 6, ey + dy * 6, top * 0.6), folder="CK/Architecture/TerraceWalls")
-                pc = pl.get_component_by_class(unreal.PointLightComponent)
-                pc.set_editor_property("intensity_units", unreal.LightUnits.UNITLESS)
-                pc.set_editor_property("intensity", float(ARGS.get("wallfill", "9000")))
-                pc.set_editor_property("attenuation_radius", 2400.0)
-                pc.set_editor_property("cast_shadows", False)
-                pc.set_editor_property("light_color", unreal.Color(r=255, g=226, b=190, a=255))
-                pc.set_editor_property("volumetric_scattering_intensity", 0.0)
-            L.spawn_mesh("Architecture/SM_Arch_Balustrade", v(ex - tx * 2.0 * seg - dx * 0.4, ey - ty * 2.0 * seg - dy * 0.4, top),
-                         rot(yaw=yaw), (seg, 1.0, 1.0), folder="CK/Architecture/TerraceWalls", collision=False)
-            n += 1
+            mx, my, _ = run[len(run) // 2]      # one warm fill per run lifts the shaded face to pale marble
+            pl = L.spawn_class(unreal.PointLight, v(mx + (mx - cx) * 0.15, my + (my - cy) * 0.15, top * 0.6), folder="CK/Architecture/TerraceWalls")
+            pc = pl.get_component_by_class(unreal.PointLightComponent)
+            pc.set_editor_property("intensity_units", unreal.LightUnits.UNITLESS)
+            pc.set_editor_property("intensity", float(ARGS.get("wallfill", "9000")))
+            pc.set_editor_property("attenuation_radius", 2400.0)
+            pc.set_editor_property("cast_shadows", False)
+            pc.set_editor_property("light_color", unreal.Color(r=255, g=226, b=190, a=255))
+            pc.set_editor_property("volumetric_scattering_intensity", 0.0)
     print("terrace walls", n)
+
+
+# 13 house types (House_01-06 + Town_01/02, TowerHouse, DomeHouse, Gatehouse, Manor, Courtyard); spired towers ~5 %
+HOUSE_WEIGHTS = [("House_01", 3), ("House_02", 3), ("House_03", 3), ("House_04", 3), ("House_05", 3), ("House_06", 3),
+                 ("Town_01", 4), ("Town_02", 4), ("TowerHouse", 3), ("DomeHouse", 3), ("Gatehouse", 2),
+                 ("Manor", 2.5), ("Courtyard", 1.5), ("TowerRound", 1), ("TowerSquare", 1)]
+BIG_HOUSES = ("Manor", "Courtyard")
+
+
+def pick_house(rng, big=True):
+    pool = [(m, w) for m, w in HOUSE_WEIGHTS if big or m not in BIG_HOUSES]
+    t = rng.uniform(0, sum(w for _, w in pool))
+    for m, w in pool:
+        t -= w
+        if t <= 0:
+            return m
+    return pool[-1][0]
 
 
 FILL_MESHES = [("Architecture/SM_Bldg_House_01", 1.0), ("Architecture/SM_Bldg_House_02", 1.0), ("Architecture/SM_Bldg_House_03", 1.0),
@@ -212,7 +248,7 @@ def build_city_fill(rng):
             g2 = L.ground_z(fx, fy)
             if g2 is None or abs(g2 - top) > 1.5:
                 continue
-            mesh, sc = rng.choice(FILL_MESHES)
+            mesh, sc = "Architecture/SM_Bldg_" + pick_house(rng, big=False), 1.0
             # real-world proportions: no per-instance rescale (0.55-1.1x made identical houses look like toys or giants)
             yaw = face_yaw(x, y, math.cos(face), math.sin(face)) + rng.uniform(-25, 25)
             L.spawn_mesh(mesh, v(x, y, top - 0.3), rot(yaw=yaw), sc, folder="CK/Architecture/Fill",
@@ -769,7 +805,7 @@ def build_game_mode():
     print("game mode ok")
 
 
-def build_lot_houses(rng):
+def build_lot_houses(rng, keep_existing=False):
     """Plan step 5: put a house on every free lot from the map (Saved/lots.json, Tools/make_map.py), door to the road."""
     import json
     path = os.path.join(unreal.Paths.project_saved_dir(), "lots.json")
@@ -782,11 +818,22 @@ def build_lot_houses(rng):
         x, y = lot["x"], lot["y"]
         if x < 25 and abs(y - 5) < 40:      # P9/P10 sit in the reference camera's foreground: keep them empty
             continue
+        if keep_existing:
+            busy = False
+            for a in L.EAS.get_all_level_actors():
+                f = str(a.get_folder_path())
+                if f.startswith("CK/Architecture") and not f.startswith("CK/Architecture/TerraceWalls") and isinstance(a, unreal.StaticMeshActor):
+                    o, e = a.get_actor_bounds(False)
+                    if o.x / M - e.x / M - 4 < x < o.x / M + e.x / M + 4 and o.y / M - e.y / M - 4 < y < o.y / M + e.y / M + 4:
+                        busy = True
+                        break
+            if busy:
+                continue
         gz = L.ground_z(x, y)
         if gz is None:
             continue
         rx, ry = lot["road"]
-        mesh = rng.choice(["House_01", "House_02", "House_03", "House_04", "House_05", "House_06"])
+        mesh = pick_house(rng, big=False)
         sm = unreal.load_asset("/Game/CrystalKingdom/Meshes/Architecture/SM_Bldg_" + mesh)
         b = sm.get_bounding_box()
         yaw = face_yaw(x, y, rx - x, ry - y)                       # facade (+Y) toward the road
@@ -854,9 +901,8 @@ def build_streets(rng):
         if f.startswith("CK/Architecture") and not f.startswith("CK/Architecture/TerraceWalls") and isinstance(a, unreal.StaticMeshActor):
             o, e = a.get_actor_bounds(False)
             boxes.append((o.x / M - e.x / M, o.x / M + e.x / M, o.y / M - e.y / M, o.y / M + e.y / M))
-    meshes = ["House_01", "House_02", "House_03", "House_04", "House_05", "House_06"] * 3 + ["TowerRound", "TowerSquare"]
     spacing = float(ARGS.get("street_gap", "13"))
-    n = cleared = 0
+    n = cleared = spires = 0
     from collections import Counter
     why = Counter()
     for r in plan["roads"]:
@@ -871,63 +917,164 @@ def build_streets(rng):
             acc = 0.0
             ux, uy = (x1 - x0) / seg, (y1 - y0) / seg
             for side, row in ((-1, 0), (1, 0), (-1, 1), (1, 1)):   # two rows deep on both sides -> city blocks
-                mesh = rng.choice(meshes)
-                sm = unreal.load_asset("/Game/CrystalKingdom/Meshes/Architecture/SM_Bldg_" + mesh)
-                b = sm.get_bounding_box()
-                hd = (b.max.y - b.min.y) / 2 / M          # half depth (facade -> back)
-                hw = (b.max.x - b.min.x) / 2 / M
-                rad = max(hd, hw) + 1.0
-                off = w / 2 + 1.5 + rad + row * (2 * rad + 4.0)   # row 1 sits behind row 0 with a 4 m lane
-                cx, cy = x1 - uy * side * off, y1 + ux * side * off
-                if cx < 50 and -45 < cy < 55:
-                    why["camera"] += 1
-                    continue
-                # centre + back must stand on land; the street-side edge may dip toward the water (a stone plinth fills it)
-                bkx, bky = cx - (x1 - cx) / off * rad, cy - (y1 - cy) / off * rad
-                core = [L.ground_z(cx, cy), L.ground_z(bkx, bky)]
-                if any(g is None or g < -0.05 for g in core):
-                    why["water/void"] += 1
-                    continue
-                gzs = core + [L.ground_z(cx + dx, cy + dy) for dx, dy in ((rad, 0), (-rad, 0), (0, rad), (0, -rad))]
-                gzs = [g if g is not None else -0.5 for g in gzs]
-                if max(gzs) - min(gzs) > float(ARGS.get("street_slope", "7.0")):
-                    why["slope"] += 1
-                    continue
-                bx = (cx - rad, cx + rad, cy - rad, cy + rad)
-                if any(not (bx[1] + 2 < o[0] or o[1] < bx[0] - 2 or bx[3] + 2 < o[2] or o[3] < bx[2] - 2) for o in boxes):
-                    why["building"] += 1
-                    continue
-                if _road_hits(grid, bx[0] + 0.5, bx[1] - 0.5, bx[2] + 0.5, bx[3] - 0.5, margin=0.5):
-                    why["road"] += 1
-                    continue
-                gz = max(gzs) if max(gzs) - min(gzs) > 0.6 else max(min(gzs), 0.1)   # sloped plot: floor at the high side
-                low = max(min(gzs), -0.6)
-                if gz - low > 0.6:   # dressed-stone plinth terraced into the slope
-                    L.spawn_mesh("/Engine/BasicShapes/Cube", v(cx, cy, (gz + low) / 2 - 0.4), rot(yaw=face_yaw(cx, cy, x1 - cx, y1 - cy)),
-                                 (rad * 2.0 + 1.0, rad * 2.0 + 1.0, gz - low + 0.8), folder="CK/Architecture/Streets", material=MI + "MI_StoneTrim")
-                yaw = face_yaw(cx, cy, x1 - cx, y1 - cy)        # facade (+Y) toward the street
-                a_ = math.radians(yaw)
-                cxl, cyl = (b.min.x + b.max.x) / 2 / M, (b.min.y + b.max.y) / 2 / M
-                ox = cxl * math.cos(a_) - cyl * math.sin(a_)
-                oy = cxl * math.sin(a_) + cyl * math.cos(a_)
-                cleared += clear_crystals(lambda a0, a1, b0, b1: not (a1 < bx[0] - 1 or bx[1] + 1 < a0 or b1 < bx[2] - 1 or bx[3] + 1 < b0))
-                L.spawn_mesh("Architecture/SM_Bldg_" + mesh, v(cx - ox, cy - oy, gz - 0.3), rot(yaw=yaw), 1.0, folder="CK/Architecture/Streets",
-                             label="Street_SM_Bldg_%s_%03d" % (mesh, n))
-                boxes.append(bx)
-                # front walk: door (facade middle) to the carriageway edge
-                dx_, dy_ = x1 - cx, y1 - cy
-                dl = math.hypot(dx_, dy_) or 1
-                sx_, sy_ = cx + dx_ / dl * hd, cy + dy_ / dl * hd
-                ex_, ey_ = x1 - dx_ / dl * (w / 2 - 0.5), y1 - dy_ / dl * (w / 2 - 0.5)
-                wl = math.hypot(ex_ - sx_, ey_ - sy_)
-                if wl > 0.3 and row == 0:
-                    rz = L.ground_z(ex_, ey_)
-                    rz = 0.15 if rz is None else max(rz, 0.15)
-                    L.spawn_mesh("/Engine/BasicShapes/Cube", v((sx_ + ex_) / 2, (sy_ + ey_) / 2, (gz + rz) / 2 + 0.08),
-                                 rot(pitch=math.degrees(math.atan2(rz - gz, wl)), yaw=math.degrees(math.atan2(ey_ - sy_, ex_ - sx_))),
-                                 (math.hypot(wl, rz - gz) + 0.4, 2.2, 0.3), folder="CK/Roads/Walk", material=MI + "MI_StoneTrim", shadows=False)
-                n += 1
+              first = pick_house(rng)
+              while first in ("TowerRound", "TowerSquare") and spires >= int(ARGS.get("max_spires", "2")):
+                  first = pick_house(rng)
+              for mesh in (first, "Town_01"):   # big plot pick, else a narrow town house
+                  sm = unreal.load_asset("/Game/CrystalKingdom/Meshes/Architecture/SM_Bldg_" + mesh)
+                  b = sm.get_bounding_box()
+                  hd = (b.max.y - b.min.y) / 2 / M          # half depth (facade -> back)
+                  hw = (b.max.x - b.min.x) / 2 / M
+                  rad = max(hd, hw) + 1.0
+                  off = w / 2 + 1.5 + rad + row * (2 * rad + 4.0)   # row 1 sits behind row 0 with a 4 m lane
+                  cx, cy = x1 - uy * side * off, y1 + ux * side * off
+                  if cx < 50 and -45 < cy < 55:
+                      why["camera"] += 1
+                      continue
+                  # centre + back must stand on land; the street-side edge may dip toward the water (a stone plinth fills it)
+                  bkx, bky = cx - (x1 - cx) / off * rad, cy - (y1 - cy) / off * rad
+                  core = [L.ground_z(cx, cy), L.ground_z(bkx, bky)]
+                  if any(g is None or g < -0.05 for g in core):
+                      why["water/void"] += 1
+                      continue
+                  gzs = core + [L.ground_z(cx + dx, cy + dy) for dx, dy in ((rad, 0), (-rad, 0), (0, rad), (0, -rad))]
+                  gzs = [g if g is not None else -0.5 for g in gzs]
+                  if max(gzs) - min(gzs) > float(ARGS.get("street_slope", "7.0")):
+                      why["slope"] += 1
+                      continue
+                  bx = (cx - rad, cx + rad, cy - rad, cy + rad)
+                  if any(not (bx[1] + 2 < o[0] or o[1] < bx[0] - 2 or bx[3] + 2 < o[2] or o[3] < bx[2] - 2) for o in boxes):
+                      why["building"] += 1
+                      continue
+                  if _road_hits(grid, bx[0] + 0.5, bx[1] - 0.5, bx[2] + 0.5, bx[3] - 0.5, margin=0.5):
+                      why["road"] += 1
+                      continue
+                  gz = max(gzs) if max(gzs) - min(gzs) > 0.6 else max(min(gzs), 0.1)   # sloped plot: floor at the high side
+                  low = max(min(gzs), -0.6)
+                  if gz - low > 0.6:   # dressed-stone plinth terraced into the slope
+                      L.spawn_mesh("/Engine/BasicShapes/Cube", v(cx, cy, (gz + low) / 2 - 0.4), rot(yaw=face_yaw(cx, cy, x1 - cx, y1 - cy)),
+                                   (rad * 2.0 + 1.0, rad * 2.0 + 1.0, gz - low + 0.8), folder="CK/Architecture/Streets", material=MI + "MI_StoneTrim")
+                  yaw = face_yaw(cx, cy, x1 - cx, y1 - cy)        # facade (+Y) toward the street
+                  a_ = math.radians(yaw)
+                  cxl, cyl = (b.min.x + b.max.x) / 2 / M, (b.min.y + b.max.y) / 2 / M
+                  ox = cxl * math.cos(a_) - cyl * math.sin(a_)
+                  oy = cxl * math.sin(a_) + cyl * math.cos(a_)
+                  cleared += clear_crystals(lambda a0, a1, b0, b1: not (a1 < bx[0] - 1 or bx[1] + 1 < a0 or b1 < bx[2] - 1 or bx[3] + 1 < b0))
+                  L.spawn_mesh("Architecture/SM_Bldg_" + mesh, v(cx - ox, cy - oy, gz - 0.3), rot(yaw=yaw), 1.0, folder="CK/Architecture/Streets",
+                               label="Street_SM_Bldg_%s_%03d" % (mesh, n))
+                  boxes.append(bx)
+                  # front walk: door (facade middle) to the carriageway edge
+                  dx_, dy_ = x1 - cx, y1 - cy
+                  dl = math.hypot(dx_, dy_) or 1
+                  sx_, sy_ = cx + dx_ / dl * hd, cy + dy_ / dl * hd
+                  ex_, ey_ = x1 - dx_ / dl * (w / 2 - 0.5), y1 - dy_ / dl * (w / 2 - 0.5)
+                  wl = math.hypot(ex_ - sx_, ey_ - sy_)
+                  if wl > 0.3 and row == 0:
+                      rz = L.ground_z(ex_, ey_)
+                      rz = 0.15 if rz is None else max(rz, 0.15)
+                      L.spawn_mesh("/Engine/BasicShapes/Cube", v((sx_ + ex_) / 2, (sy_ + ey_) / 2, (gz + rz) / 2 + 0.08),
+                                   rot(pitch=math.degrees(math.atan2(rz - gz, wl)), yaw=math.degrees(math.atan2(ey_ - sy_, ex_ - sx_))),
+                                   (math.hypot(wl, rz - gz) + 0.4, 2.2, 0.3), folder="CK/Roads/Walk", material=MI + "MI_StoneTrim", shadows=False)
+                  n += 1
+                  spires += mesh in ("TowerRound", "TowerSquare")
+                  break
     print("street houses", n, "crystals cleared for plots", cleared, "| rejected:", dict(why))
+
+
+def build_landscape(rng):
+    """Street landscaping along the road network: long stone planters, wrought-iron lamps, benches and
+    round planters at road ends. Never on water, on another road, against a building or over a doorway."""
+    import json
+    plan = json.load(open(os.path.join(unreal.Paths.project_saved_dir(), "road_plan.json"), encoding="utf-8"))
+    L.reset_terrain_cache()
+    grid = _road_hash(plan)
+    boxes = []
+    for a in L.EAS.get_all_level_actors():
+        f = str(a.get_folder_path())
+        if f.startswith("CK/Architecture") and not f.startswith("CK/Architecture/TerraceWalls") and isinstance(a, unreal.StaticMeshActor):
+            o, e = a.get_actor_bounds(False)
+            boxes.append((o.x / M - e.x / M, o.x / M + e.x / M, o.y / M - e.y / M, o.y / M + e.y / M))
+    doors = [r["pts"][0] for r in plan["roads"] if r["kind"] == "spur"] + \
+            [p for r in plan["roads"] if r["kind"] == "lane" for p in (r["pts"][0], r["pts"][-1])]
+    placed = []
+
+    def free(x, y, rad):
+        if x < 48 and -48 < y < 58:
+            return False
+        g = L.ground_z(x, y)
+        if g is None or g < -0.05:
+            return False
+        if any(b0 - rad < x < b1 + rad and c0 - rad < y < c1 + rad for b0, b1, c0, c1 in boxes):
+            return False
+        if _road_hits(grid, x - rad * 0.4, x + rad * 0.4, y - rad * 0.4, y + rad * 0.4, margin=0.0):
+            return False
+        if any(math.hypot(x - dx, y - dy) < 5.0 for dx, dy in doors):
+            return False
+        if any(math.hypot(x - px_, y - py_) < 3.0 for px_, py_ in placed):
+            return False
+        return True
+
+    counts = {"planter": 0, "lamp": 0, "bench": 0, "round": 0}
+    for r in plan["roads"]:
+        pts, w = r["pts"], r["width"]
+        length = 0.0
+        nxt = {"planter": 9.0, "lamp": 4.0, "bench": 30.0}
+        gap = {"planter": 24.0, "lamp": 19.0, "bench": 70.0 if r["kind"] == "ring" else 1e9}
+        side_flip = 1
+        for k in range(1, len(pts)):
+            (x0, y0), (x1, y1) = pts[k - 1], pts[k]
+            seg = math.hypot(x1 - x0, y1 - y0)
+            if seg < 0.05:
+                continue
+            length += seg
+            ux, uy = (x1 - x0) / seg, (y1 - y0) / seg
+            for kind in ("planter", "lamp", "bench"):
+                if length < nxt[kind]:
+                    continue
+                nxt[kind] = length + gap[kind]
+                side_flip = -side_flip
+                for side in (side_flip, -side_flip):
+                    nx_, ny_ = -uy * side, ux * side          # unit normal toward this side
+                    if kind == "planter":
+                        off = w / 2 + 1.0
+                        cx, cy = x1 + nx_ * off, y1 + ny_ * off
+                        if not all(free(cx + ux * t, cy + uy * t, 0.9) for t in (-2.6, 0.0, 2.6)):
+                            continue
+                        g = L.ground_z(cx, cy)
+                        L.spawn_mesh("Props/SM_Prop_PlanterLong_%02d" % rng.randint(1, 3), v(cx, cy, g - 0.05),
+                                     rot(yaw=math.degrees(math.atan2(uy, ux))), 1.0, folder="CK/Landscape/Planters")
+                    elif kind == "lamp":
+                        off = w / 2 + 0.6
+                        cx, cy = x1 + nx_ * off, y1 + ny_ * off
+                        if not free(cx, cy, 0.6):
+                            continue
+                        g = L.ground_z(cx, cy)
+                        L.spawn_mesh("Props/SM_Prop_StreetLamp_01", v(cx, cy, g - 0.05),
+                                     rot(yaw=math.degrees(math.atan2(-ny_, -nx_))), 1.0, folder="CK/Landscape/Lamps")   # arm over the road
+                    else:
+                        off = w / 2 + 1.1
+                        cx, cy = x1 + nx_ * off, y1 + ny_ * off
+                        if not free(cx, cy, 1.4):
+                            continue
+                        g = L.ground_z(cx, cy)
+                        L.spawn_mesh("Props/SM_Prop_Bench_01", v(cx, cy, g - 0.02),
+                                     rot(yaw=math.degrees(math.atan2(-nx_, ny_))), 1.0, folder="CK/Landscape/Benches")   # seat faces the road
+                    placed.append((cx, cy))
+                    counts[kind] += 1
+                    break
+        # round planter beside each lane / spur end
+        if r["kind"] in ("lane", "spur") and len(pts) > 3:
+            (ex, ey), (px_, py_) = pts[-1], pts[-3]
+            dx, dy = ex - px_, ey - py_
+            dl = math.hypot(dx, dy) or 1
+            cx, cy = ex - dy / dl * (w / 2 + 1.6), ey + dx / dl * (w / 2 + 1.6)
+            if free(cx, cy, 1.2):
+                g = L.ground_z(cx, cy)
+                L.spawn_mesh("Props/SM_Prop_PlanterRound_%02d" % rng.randint(1, 2), v(cx, cy, g - 0.05), rot(yaw=rng.uniform(0, 360)), 1.0,
+                             folder="CK/Landscape/Planters")
+                placed.append((cx, cy))
+                counts["round"] += 1
+    print("landscape", counts)
 
 
 def build_roads():
@@ -937,46 +1084,122 @@ def build_roads():
     plan = json.load(open(os.path.join(unreal.Paths.project_saved_dir(), "road_plan.json"), encoding="utf-8"))
     L.reset_terrain_cache()
     pave = MI + "MI_StoneTrim"   # pale dressed stone (MI_Stone stretched on a cube read as a dark slab)
-    n = 0
+    n = emb = 0
     road_pts = []
+    max_grade = math.tan(math.radians(float(ARGS.get("max_grade", "16"))))
+
+    def in_fg(x, y):
+        return x < 45 and -45 < y < 55          # reference camera foreground: open water, no quay road
+
+    def pad(ex, ey, w, kind, fg_ok=False):
+        gz = L.ground_z(ex, ey)
+        if gz is None or gz < -0.3 or (in_fg(ex, ey) and not fg_ok):
+            return 0
+        zoff = {"ring": 0.06, "spur": 0.09, "lane": 0.12}.get(kind, 0.06)
+        L.spawn_mesh("/Engine/BasicShapes/Cylinder", v(ex, ey, max(gz, 0.15) + zoff + 0.01), rot(), (w * 1.25, w * 1.25, 0.35),
+                     folder="CK/Roads/Pads", material=pave, shadows=False)
+        return 1
+
     for r in plan["roads"]:
         w = r["width"]
         pts = r["pts"]
-        zs = []
-        for x, y in pts:
-            gz = L.ground_z(x, y)
-            fg = x < 50 and -45 < y < 55                       # reference camera foreground: keep the water open
-            if gz is None or gz < -0.3:
-                zs.append(0.15 if fg else 1.4)                  # causeway deck 1.4 m above the water (flush paving in the foreground)
+        kind = r["kind"]
+        gzs = [L.ground_z(x, y) for x, y in pts]
+        wet = [g is None or g < -0.3 for g in gzs]
+        zs = [(0.15 if in_fg(x, y) else 1.4) if wet[k] else max(gzs[k], 0.15) for k, (x, y) in enumerate(pts)]
+        for _ in range(3):   # wide smoothing: no saw-tooth ramps where the probe flickers between ledge and water
+            zs = [(zs[max(k - 2, 0)] + zs[max(k - 1, 0)] + 2 * zs[k] + zs[min(k + 1, len(zs) - 1)] + zs[min(k + 2, len(zs) - 1)]) / 6
+                  for k in range(len(zs))]
+        # grade limit: never a gap at a terrace edge - the low side is raised onto a dressed-stone embankment instead
+        seglen = [math.hypot(pts[k + 1][0] - pts[k][0], pts[k + 1][1] - pts[k][1]) for k in range(len(pts) - 1)]
+        for _ in range(2):
+            for k in range(1, len(zs)):
+                zs[k] = max(zs[k], zs[k - 1] - max_grade * seglen[k - 1])
+            for k in range(len(zs) - 2, -1, -1):
+                zs[k] = max(zs[k], zs[k + 1] - max_grade * seglen[k])
+        nseg = len(pts) - 1
+        skip = [False] * nseg
+        if kind == "ring":
+            for k in range(nseg):
+                skip[k] = in_fg((pts[k][0] + pts[k + 1][0]) / 2, (pts[k][1] + pts[k + 1][1]) / 2)
+            # never end over water: grow the open stretch through adjacent causeway segments to the shore
+            changed = True
+            while changed:
+                changed = False
+                for k in range(nseg):
+                    if not skip[k] and (wet[k] or wet[k + 1]) and (skip[k - 1] or skip[(k + 1) % nseg]):
+                        skip[k] = changed = True
+        # causeway runs: contiguous wet segments, short dry gaps (<= 2) bridged, only runs >= 4 segments get railings
+        seg_wet = [wet[k] and wet[k + 1] for k in range(nseg)]
+        for k in range(nseg):
+            if not seg_wet[k]:
+                lo = next((j for j in range(k - 1, max(k - 3, -1), -1) if seg_wet[j]), None)
+                hi = next((j for j in range(k + 1, min(k + 3, nseg)) if seg_wet[j]), None)
+                if lo is not None and hi is not None:
+                    seg_wet[k] = True
+        rail = [False] * nseg
+        k = 0
+        while k < nseg:
+            if seg_wet[k] and not skip[k]:
+                j = k
+                while j < nseg and seg_wet[j] and not skip[j]:
+                    j += 1
+                if j - k >= 4:
+                    for q in range(k, j):
+                        rail[q] = True
+                k = j
             else:
-                zs.append(max(gz, 0.15))                         # shallows: never sink the paving below the water surface
-        zs = [(zs[max(k - 1, 0)] + 2 * zs[k] + zs[min(k + 1, len(zs) - 1)]) / 4 for k in range(len(zs))]
-        for k in range(len(pts) - 1):
+                k += 1
+        zoff = {"ring": 0.06, "spur": 0.09, "lane": 0.12}.get(kind, 0.06)   # stacked, never coplanar
+        for k in range(nseg):
+            if skip[k]:
+                continue
             (x0, y0), (x1, y1) = pts[k], pts[k + 1]
             z0, z1 = zs[k], zs[k + 1]
-            L2 = math.hypot(x1 - x0, y1 - y0)
+            L2 = seglen[k]
             if L2 < 0.2:
                 continue
             yaw = math.degrees(math.atan2(y1 - y0, x1 - x0))
             pitch = math.degrees(math.atan2(z1 - z0, L2))
-            if (x0 + x1) / 2 < 45 and -45 < (y0 + y1) / 2 < 55 and r["kind"] == "ring":
-                continue   # the reference frame has open water and crystal stumps here, not a quay road
-            L.spawn_mesh("/Engine/BasicShapes/Cube", v((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2 + 0.06), rot(pitch=pitch, yaw=yaw),
-                         ((L2 + 0.35) / 1.0, w, 0.35), folder="CK/Roads/" + r["kind"].capitalize(), material=pave, shadows=False)
+            mx_, my_, mz = (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2
+            L.spawn_mesh("/Engine/BasicShapes/Cube", v(mx_, my_, mz + zoff), rot(pitch=pitch, yaw=yaw),
+                         ((L2 + 0.35) / 1.0, w, 0.35), folder="CK/Roads/" + kind.capitalize(), material=pave, shadows=False)
             n += 1
-            gz0 = L.ground_z((x0 + x1) / 2, (y0 + y1) / 2)
-            mx_, my_ = (x0 + x1) / 2, (y0 + y1) / 2
-            if gz0 is not None and gz0 < -0.3 and not (mx_ < 50 and -45 < my_ < 55):   # over water: piers + balustrades
+            gmid = L.ground_z(mx_, my_)
+            gl = [g for g in (gzs[k], gmid, gzs[k + 1]) if g is not None]
+            glow = sorted(gl)[len(gl) // 2] if gl else None             # median: one sample over a cliff edge must not drag a tower down it
+            if glow is not None and glow > -0.3 and mz - glow > 0.3:     # raised over land: low embankment, never a floating slab
+                hb = min(mz - glow + 0.5, 3.0)
+                L.spawn_mesh("/Engine/BasicShapes/Cube", v(mx_, my_, mz + 0.25 - hb / 2), rot(yaw=yaw),
+                             (L2 + 0.4, w + 0.4, hb), folder="CK/Roads/Embankment", material=pave, shadows=False)
+                emb += 1
+            elif (glow is None or glow <= -0.3) and not rail[k] and k % 2 == 0:   # short wet stretch: piers under the deck
+                gb = glow if glow is not None else -3.0
+                for sd in (-1, 1):
+                    L.spawn_mesh("/Engine/BasicShapes/Cylinder", v(mx_ - math.sin(math.radians(yaw)) * sd * (w / 2 - 0.6),
+                                                                  my_ + math.cos(math.radians(yaw)) * sd * (w / 2 - 0.6), (gb + mz) / 2),
+                                 rot(), (1.0, 1.0, max(0.5, mz - gb)), folder="CK/Roads/Causeway", material=pave, shadows=False)
+            if rail[k]:
                 ux, uy = (x1 - x0) / L2, (y1 - y0) / L2
                 nx_, ny_ = -uy, ux
+                gbed = gmid if gmid is not None else -2.0
                 if k % 3 == 0:
                     for sd in (-1, 1):
-                        L.spawn_mesh("/Engine/BasicShapes/Cylinder", v(x0 + nx_ * sd * (w / 2 - 0.5), y0 + ny_ * sd * (w / 2 - 0.5), (gz0 + z0) / 2),
-                                     rot(), (1.0, 1.0, max(0.5, (z0 - gz0) / 1.0)), folder="CK/Roads/Causeway", material=pave, shadows=False)
+                        L.spawn_mesh("/Engine/BasicShapes/Cylinder", v(x0 + nx_ * sd * (w / 2 - 0.5), y0 + ny_ * sd * (w / 2 - 0.5), (gbed + z0) / 2),
+                                     rot(), (1.0, 1.0, max(0.5, (z0 - gbed) / 1.0)), folder="CK/Roads/Causeway", material=pave, shadows=False)
                 for sd in (-1, 1):
                     L.spawn_mesh("Architecture/SM_Arch_Balustrade", v(x0 + nx_ * sd * (w / 2), y0 + ny_ * sd * (w / 2), z0 + 0.2),
-                                 rot(yaw=yaw), (L2 / 4.0, 1.0, 1.0), folder="CK/Roads/Causeway", collision=False)
+                                 rot(pitch=pitch, yaw=yaw), ((L2 + 0.05) / 4.0, 1.0, 1.0), folder="CK/Roads/Causeway", collision=False)
         road_pts += [(x, y, w) for x, y in pts]
+        # rounded paving pads where a road ends (or the ring opens for the camera): no ragged slab corners
+        if kind != "ring":
+            n += pad(pts[0][0], pts[0][1], w, kind) + pad(pts[-1][0], pts[-1][1], w, kind)
+        else:
+            for k in range(nseg):
+                if skip[k] != skip[(k + 1) % nseg]:
+                    q = pts[k + 1]
+                    n += pad(q[0], q[1], w, kind, fg_ok=True)
+    print("embankments", emb)
     removed = clear_crystals(lambda x0, x1, y0, y1: _road_hits(_road_hash(plan), x0, x1, y0, y1, margin=0.5))
     bboxes = []
     for a in L.EAS.get_all_level_actors():
@@ -1111,6 +1334,11 @@ def main():
         L.clear_ck("CK/Architecture/Streets")
         L.clear_ck("CK/Roads/Walk")
         build_streets(random.Random(int(ARGS.get("streetseed", "21"))))
+    if STAGE == "lotsadd":
+        build_lot_houses(random.Random(int(ARGS.get("lotseed", "89"))), keep_existing=True)
+    if STAGE == "landscape":
+        L.clear_ck("CK/Landscape")
+        build_landscape(random.Random(int(ARGS.get("landseed", "33"))))
     if STAGE == "roads":
         L.clear_ck("CK/Roads")
         build_roads()

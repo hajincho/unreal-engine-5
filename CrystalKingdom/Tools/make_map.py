@@ -162,6 +162,21 @@ for prefix, items, col, stroke in (("R", roads, "#c8963e", "#ffd590"), ("B", bld
                  'stroke="#000" stroke-width="2.6" paint-order="stroke">%s</text>' % (cx, cy + 4, tag))
         legend.append((tag, short(s["label"]), s["c"], s["z"]))
 
+# ---- street furniture: planters (dark green bars), lamps (yellow dots), benches (grey bars)
+for pr in data.get("props", []):
+    cx, cy = px(pr["x"], pr["y"])
+    if pr["k"] == "lamp":
+        o.append('<circle cx="%.1f" cy="%.1f" r="2.2" fill="#ffd34d" stroke="#5a4400" stroke-width="0.6"/>' % (cx, cy))
+    else:
+        L_, W_ = (6.0, 1.1) if pr["k"] == "planter" else (2.2, 0.6)
+        a_ = math.radians(pr["yaw"])
+        pts = []
+        for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+            wx = pr["x"] + math.cos(a_) * sx * L_ / 2 - math.sin(a_) * sy * W_ / 2
+            wy = pr["y"] + math.sin(a_) * sx * L_ / 2 + math.cos(a_) * sy * W_ / 2
+            pts.append("%.1f,%.1f" % px(wx, wy))
+        o.append('<polygon points="%s" fill="%s" stroke="#111" stroke-width="0.5"/>' % (" ".join(pts), "#1f6b2a" if pr["k"] == "planter" else "#9a9a9a"))
+
 # ---- cameras
 for c in data["cams"]:
     cx, cy = px(c["x"], c["y"])
@@ -180,7 +195,7 @@ for c in data["cams"]:
 lx = W - LEG_W + 10
 ly = PAD_T
 o.append('<text x="%d" y="%d" fill="#eee" font-size="15" font-weight="700">범례</text>' % (lx, ly))
-sw = [("건물·집", "#46a050"), ("도로 (계획 도로망 + 다리·계단·광장)", "#c8963e"), ("건축 가능 부지 12×12 m", "#ff3b3b"), ("단구 윗면", "rgb(176,166,148)"),
+sw = [("건물·집", "#46a050"), ("도로 (계획 도로망 + 다리·계단·광장)", "#c8963e"), ("건축 가능 부지 12×12 m", "#ff3b3b"), ("도로변 화분", "#1f6b2a"), ("가로등", "#ffd34d"), ("벤치", "#9a9a9a"), ("단구 윗면", "rgb(176,166,148)"),
       ("동굴 바닥", "rgb(92,84,74)"), ("석조 옹벽", "rgb(214,206,190)"), ("수정", "rgb(196,176,232)"), ("암석", "rgb(120,116,110)"),
       ("호수 (진할수록 깊음)", "rgb(60,120,170)")]
 for k, (name, col) in enumerate(sw):
@@ -201,6 +216,10 @@ if lots:
         col, row = divmod(k - 1, 26)
         o.append('<text x="%.1f" y="%.1f" fill="#ff9a9a" font-size="11">P%d (%.0f, %.0f, %.0f)</text>'
                  % (lx + col * 115, ly2 + 16 + row * 14.5, k, x, y, z))
+need = int(ly + 18 + len(legend) * 15.5 + (40 + 26 * 14.5 if lots else 0)) + 30   # long building list: grow the canvas
+if need > H:
+    o[0] = o[0].replace('height="%d"' % H, 'height="%d"' % need)
+    o[1] = '<rect width="100%" height="100%" fill="#16181c"/>'
 o.append("</svg>")
 open(out, "w", encoding="utf-8").write("\n".join(o))
 print("map", out, "roads", len(roads), "buildings", len(blds))

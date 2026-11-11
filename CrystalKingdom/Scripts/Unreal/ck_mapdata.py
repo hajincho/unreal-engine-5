@@ -32,6 +32,8 @@ def category(actor):
         return "void"
     f = str(actor.get_folder_path())
     name = actor.get_actor_label()
+    if f.startswith("CK/Landscape"):
+        return "prop"
     if f.startswith("CK/Roads"):
         return "road"
     if f.startswith("CK/Cave"):
@@ -109,6 +111,14 @@ for a in EAS.get_all_level_actors():
         shapes.append({"kind": c, "label": a.get_actor_label(), "pts": fp, "c": [round(p.x / M, 1), round(p.y / M, 1)], "z": round(p.z / M, 1),
                        "door": [round(d.x / M, 1), round(d.y / M, 1)]})
 
+props = []   # street furniture markers
+for a in EAS.get_all_level_actors():
+    f = str(a.get_folder_path())
+    if f.startswith("CK/Landscape") and isinstance(a, unreal.StaticMeshActor):
+        p = a.get_actor_location()
+        kind = "lamp" if "Lamp" in f else ("bench" if "Bench" in f else "planter")
+        props.append({"k": kind, "x": round(p.x / M, 1), "y": round(p.y / M, 1), "yaw": round(a.get_actor_rotation().yaw, 1)})
+
 cams = []
 for a in EAS.get_all_level_actors():
     if isinstance(a, unreal.CineCameraActor):
@@ -119,5 +129,5 @@ if SHAPES_ONLY:
     old = json.load(open(out, encoding="utf-8"))
     cells, xs, ys = old["cells"], old["xs"], old["ys"]
 with open(out, "w", encoding="utf-8") as f:
-    json.dump({"step": STEP, "xs": xs, "ys": ys, "cells": cells, "shapes": shapes, "cams": cams}, f)
+    json.dump({"step": STEP, "xs": xs, "ys": ys, "cells": cells, "shapes": shapes, "cams": cams, "props": props}, f)
 print("map data", out, len(xs), "x", len(ys), "shapes", len(shapes))

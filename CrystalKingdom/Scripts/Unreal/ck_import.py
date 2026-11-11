@@ -59,7 +59,7 @@ def import_meshes():
     nanite = ARGS.get("nanite", "1") == "1"
     collision = ARGS.get("collision", "complex")
     flt = ARGS.get("filter", "")
-    files = sorted(f for f in glob.glob(os.path.join(src, "*.fbx")) if flt in os.path.basename(f))
+    files = sorted(f for f in glob.glob(os.path.join(src, "*.fbx")) if any(x in os.path.basename(f) for x in flt.split(",")))
     tools = unreal.AssetToolsHelpers.get_asset_tools()
     for f in files:
         t = unreal.AssetImportTask()
@@ -93,7 +93,7 @@ def import_textures():
     src = os.path.join(PROJ, "SourceArt", "Textures")
     dest = "/Game/CrystalKingdom/Textures"
     flt = ARGS.get("filter", "")
-    files = sorted(f for f in glob.glob(os.path.join(src, "*.png")) if flt in os.path.basename(f))
+    files = sorted(f for f in glob.glob(os.path.join(src, "*.png")) if any(x in os.path.basename(f) for x in flt.split(",")))
     for f in files:
         t = unreal.AssetImportTask()
         t.set_editor_property("filename", f)
